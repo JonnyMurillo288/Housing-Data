@@ -1,0 +1,19 @@
+{
+  "error": "date_parse_failed",
+  "profile": {
+    "n_rows": 131520,
+    "n_cols": 10,
+    "columns": [
+      "hpi_type",
+      "hpi_flavor",
+      "frequency",
+      "level",
+      "place_name",
+      "place_id",
+      "yr",
+      "period",
+      "index_nsa",
+      "index_sa"
+    ]
+  }
+}

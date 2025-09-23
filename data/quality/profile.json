@@ -1,0 +1,23 @@
+{
+  "n_rows": 131520,
+  "n_cols": 10,
+  "columns": [
+    "hpi_type",
+    "hpi_flavor",
+    "frequency",
+    "level",
+    "place_name",
+    "place_id",
+    "yr",
+    "period",
+    "index_nsa",
+    "index_sa"
+  ],
+  "metric_col": "index_sa",
+  "period_min": "1991-03-31 00:00:00",
+  "period_max": "2025-06-30 00:00:00",
+  "freq_aliases": [
+    "Q"
+  ],
+  "n_msas": 100
+}
