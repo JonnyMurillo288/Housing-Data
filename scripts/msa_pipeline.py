@@ -3,6 +3,7 @@ import os
 import sys
 import re
 import json
+import difflib
 from typing import Optional, Tuple, List
 
 import pandas as pd
@@ -21,7 +22,7 @@ except Exception as e:  # noqa: F841
 # -----------------------------
 ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 PATHS = {
-    "input_csv": os.path.join(ROOT, "hpi_master.csv"),
+    "input_csv": os.path.join(ROOT, "hpi_at_county.csv"),
     "shapefiles_dir": os.path.join(ROOT, "shapefiles"),
     "processed_dir": os.path.join(ROOT, "data", "processed"),
     "geo_dir": os.path.join(ROOT, "data", "geo"),
@@ -240,18 +241,23 @@ def load_and_clean_geometries(path: str):
     gdf["cbsa_code"] = normalize_cbsa_code(gdf[cbsa_field])
     gdf = gdf[~gdf["cbsa_code"].isna()].copy()
 
-    # Ensure one geometry per cbsa_code (dissolve if needed)
-    dup_cts = gdf["cbsa_code"].value_counts()
-    if (dup_cts > 1).any():
+    # Identify and clean MSA name from common fields
+    name_candidates = ["cbsa_title", "name", "cbsa_name", "metdivname", "namelsad", "title"]
+    name_field = next((cols[c] for c in name_candidates if c in cols), None)
+    if name_field is not None:
         try:
-            gdf = gdf.dissolve(by="cbsa_code", as_index=False)
-        except Exception as e:
-            print(f"Dissolve failed; keeping first geometry per CBSA. Error: {e}")
-            gdf = gdf.sort_values("cbsa_code").drop_duplicates(subset=["cbsa_code"], keep="first")
+            gdf["msa_name"] = clean_msa_name(gdf[name_field])
+        except Exception:
+            gdf["msa_name"] = np.nan
     else:
-        gdf = gdf.drop_duplicates(subset=["cbsa_code"], keep="first")
+        gdf["msa_name"] = np.nan
 
-    return gdf[["cbsa_code", "geometry"]]
+    gdf = gdf.dropna(subset=["msa_name"]).copy()
+
+    # One geometry per cbsa_code; keep first to preserve msa_name
+    gdf = gdf.sort_values("cbsa_code").drop_duplicates(subset=["cbsa_code"], keep="first")
+
+    return gdf[["cbsa_code", "msa_name", "geometry"]]
 
 
 # -----------------------------
@@ -326,7 +332,6 @@ def main():
     exclude = {"cbsa_code", "msa_name", "frequency", "yr", "period", "freq_alias"}
     primary_metric = choose_primary_metric(df, exclude_cols=list(exclude))
     if primary_metric is None:
-        # last attempt: coerce index_sa/index_nsa
         for c in ["index_sa", "index_nsa"]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -417,8 +422,86 @@ def main():
     # Phase 5: Join & Outputs (latest period)
     latest_df["cbsa_code"] = normalize_cbsa_code(latest_df["cbsa_code"])  # type: ignore
 
-    geo_latest = gdf.merge(latest_df, on="cbsa_code", how="left")
-    unmatched_cbsa = geo_latest[geo_latest.isna().any(axis=1)]["cbsa_code"].dropna().unique().tolist()
+    # Attach MSA names from input data and clean
+    name_lookup = df[["cbsa_code", "msa_name"]].dropna().drop_duplicates(subset=["cbsa_code"])  # type: ignore
+    latest_df = latest_df.merge(name_lookup, on="cbsa_code", how="left")
+    latest_df["msa_name"] = clean_msa_name(latest_df["msa_name"])  # type: ignore
+    latest_df['msa_name'] = latest_df['msa_name'].str.replace(" (Msad)", "", regex=False)  # type: ignore
+
+    # Fuzzy match MSA names to geometries
+    # Change the match algorithm, first check if the states are the same after the , then do fuzzy match
+    def _best_match_map(src_names: pd.Series, tgt_names: pd.Series, cutoff: float = 0.8):
+        src_list = sorted(set(src_names.dropna()))
+        tgt_list = sorted(set(tgt_names.dropna()))
+        tgt_set = set(tgt_list)
+        mapping = {}
+        scores = {}
+        for s in src_list:
+            if s in tgt_set:
+                mapping[s] = s
+                scores[s] = 1.0
+                continue
+            best_name = None
+            best_score = 0.0
+            for t in tgt_list:
+                r = difflib.SequenceMatcher(None, s, t).ratio()
+                if r > best_score:
+                    best_score = r
+                    best_name = t
+            if best_score >= cutoff and best_name is not None:
+                mapping[s] = best_name
+                scores[s] = float(best_score)
+        return mapping, scores
+    
+    def _closest_match(src_names: pd.Series, tgt_names: pd.Series):
+        src_list = sorted(set(src_names.dropna()))
+        tgt_list = sorted(set(tgt_names.dropna()))
+        mapping = {}
+        scores = {}
+        for s in src_list:
+            best_name = None
+            best_score = 0.0
+            for t in tgt_list:
+                r = difflib.SequenceMatcher(None, s, t).ratio()
+                if r > best_score:
+                    best_score = r
+                    best_name = t
+            mapping[s] = best_name
+            scores[s] = best_score
+        return mapping, scores
+    
+    name_mapping, name_scores = _best_match_map(latest_df["msa_name"], gdf["msa_name"], cutoff=0.8)  # type: ignore
+    latest_df["_matched_name"] = latest_df["msa_name"].map(name_mapping)
+    latest_df["_match_score"] = latest_df["msa_name"].map(name_scores)
+
+    # Build and save match profile
+    name_to_cbsa = dict(zip(gdf["msa_name"], gdf["cbsa_code"]))  # type: ignore
+    profile_df = latest_df[["cbsa_code", "msa_name", "_matched_name", "_match_score"]].copy()
+    profile_df["matched_cbsa_code"] = profile_df["_matched_name"].map(name_to_cbsa)
+    profile_df["exact_match"] = profile_df["_match_score"].apply(lambda x: bool(x == 1.0))
+
+    # Build unmatched profile
+    if latest_df["_matched_name"].isna().any():
+        unmatched = latest_df.loc[latest_df["_matched_name"].isna(), ["cbsa_code", "msa_name"]].copy()
+        # Find closest even if below cutoff
+        unmatched_map, unmatched_scores = _closest_match(unmatched["msa_name"], gdf["msa_name"])
+        unmatched["_closest_name"] = unmatched["msa_name"].map(unmatched_map)
+        unmatched["_closest_score"] = unmatched["msa_name"].map(unmatched_scores)
+        unmatched["closest_cbsa_code"] = unmatched["_closest_name"].map(name_to_cbsa)
+        # Append into profile_df for one combined export
+        profile_df = pd.concat([profile_df, unmatched], ignore_index=True, sort=False)
+
+    # Save profile as before
+    profile_csv = os.path.join(PATHS["quality_dir"], "msa_name_match_profile.csv")
+    try:
+        profile_df.to_csv(profile_csv, index=False)
+    except Exception as e:
+        print(f"Failed to save match profile CSV: {e}")
+
+
+    # Join geometries using matched names
+    geo_latest = gdf.merge(latest_df, left_on="msa_name", right_on="_matched_name", how="left")
+    unmatched_names = sorted(set(latest_df.loc[latest_df["_matched_name"].isna(), "msa_name"].dropna().tolist()))
 
     # Save geo outputs
     try:
@@ -428,8 +511,8 @@ def main():
 
     with open(os.path.join(PATHS["quality_dir"], "unmatched_join.json"), "w") as f:
         json.dump({
-            "unmatched_cbsa_count": int(len(unmatched_cbsa)),
-            "unmatched_cbsa_samples": unmatched_cbsa[:20],
+            "unmatched_name_count": int(len(unmatched_names)),
+            "unmatched_name_samples": unmatched_names[:20],
             "latest_period": str(latest_period),
         }, f, indent=2)
 

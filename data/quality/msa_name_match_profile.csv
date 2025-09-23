@@ -1,0 +1,137 @@
+cbsa_code,msa_name,_matched_name,_match_score,matched_cbsa_code,exact_match,_closest_name,_closest_score,closest_cbsa_code
+10580,"Albany-Schenectady-Troy, Ny","Albany-Schenectady-Troy, Ny",1.0,10580,True,,,
+10740,"Albuquerque, Nm","Albuquerque, Nm",1.0,10740,True,,,
+10900,"Allentown-Bethlehem-Easton, Pa-Nj","Allentown-Bethlehem-Easton, Pa-Nj",1.0,10900,True,,,
+11244,"Anaheim-Santa Ana-Irvine, Ca",,,,False,,,
+11694,"Arlington-Alexandria-Reston, Va-Wv",,,,False,,,
+12054,"Atlanta-Sandy Springs-Roswell, Ga",,,,False,,,
+12420,"Austin-Round Rock-San Marcos, Tx",,,,False,,,
+12540,"Bakersfield-Delano, Ca","Bakersfield, Ca",0.8108108108108109,12540,False,,,
+12580,"Baltimore-Columbia-Towson, Md","Baltimore-Columbia-Towson, Md",1.0,12580,True,,,
+12940,"Baton Rouge, La","Baton Rouge, La",1.0,12940,True,,,
+13820,"Birmingham, Al","Birmingham-Hoover, Al",0.8,13820,False,,,
+14260,"Boise City, Id","Boise City, Id",1.0,14260,True,,,
+14454,"Boston, Ma",,,,False,,,
+14860,"Bridgeport-Stamford-Danbury, Ct","Bridgeport-Stamford-Norwalk, Ct",0.8064516129032258,14860,False,,,
+15380,"Buffalo-Cheektowaga, Ny","Buffalo-Cheektowaga, Ny",1.0,15380,True,,,
+15764,"Cambridge-Newton-Framingham, Ma",,,,False,,,
+15804,"Camden, Nj","Camden, Ar",0.8,15780,False,,,
+15980,"Cape Coral-Fort Myers, Fl","Cape Coral-Fort Myers, Fl",1.0,15980,True,,,
+16700,"Charleston-North Charleston, Sc","Charleston-North Charleston, Sc",1.0,16700,True,,,
+16740,"Charlotte-Concord-Gastonia, Nc-Sc","Charlotte-Concord-Gastonia, Nc-Sc",1.0,16740,True,,,
+16984,"Chicago-Naperville-Schaumburg, Il",,,,False,,,
+17140,"Cincinnati, Oh-Ky-In","Cincinnati, Oh-Ky-In",1.0,17140,True,,,
+17410,"Cleveland, Oh","Cleveland, Ms",0.8461538461538461,17380,False,,,
+17820,"Colorado Springs, Co","Colorado Springs, Co",1.0,17820,True,,,
+17900,"Columbia, Sc","Columbia, Sc",1.0,17900,True,,,
+18140,"Columbus, Oh","Columbus, Oh",1.0,18140,True,,,
+19124,"Dallas-Plano-Irving, Tx",,,,False,,,
+19430,"Dayton-Kettering-Beavercreek, Oh",,,,False,,,
+19740,"Denver-Aurora-Centennial, Co",,,,False,,,
+19780,"Des Moines-West Des Moines, Ia","Des Moines-West Des Moines, Ia",1.0,19780,True,,,
+19804,"Detroit-Dearborn-Livonia, Mi",,,,False,,,
+20994,"Elgin, Il",,,,False,,,
+21340,"El Paso, Tx","El Paso, Tx",1.0,21340,True,,,
+21794,"Everett, Wa",,,,False,,,
+22744,"Fort Lauderdale-Pompano Beach-Sunrise, Fl","Miami-Fort Lauderdale-Pompano Beach, Fl",0.825,33100,False,,,
+23104,"Fort Worth-Arlington-Grapevine, Tx",,,,False,,,
+23224,"Frederick-Gaithersburg-Bethesda, Md",,,,False,,,
+23420,"Fresno, Ca","Fresno, Ca",1.0,23420,True,,,
+24340,"Grand Rapids-Wyoming-Kentwood, Mi","Grand Rapids-Kentwood, Mi",0.8620689655172413,24340,False,,,
+24660,"Greensboro-High Point, Nc","Greensboro-High Point, Nc",1.0,24660,True,,,
+24860,"Greenville-Anderson-Greer, Sc","Greenville-Anderson, Sc",0.8846153846153846,24860,False,,,
+25540,"Hartford-West Hartford-East Hartford, Ct",,,,False,,,
+26420,"Houston-Pasadena-The Woodlands, Tx",,,,False,,,
+26900,"Indianapolis-Carmel-Greenwood, In","Indianapolis-Carmel-Anderson, In",0.8,26900,False,,,
+27260,"Jacksonville, Fl","Jacksonville, Fl",1.0,27260,True,,,
+28140,"Kansas City, Mo-Ks","Kansas City, Mo-Ks",1.0,28140,True,,,
+28940,"Knoxville, Tn","Knoxville, Tn",1.0,28940,True,,,
+29460,"Lakeland-Winter Haven, Fl","Lakeland-Winter Haven, Fl",1.0,29460,True,,,
+29484,"Lakewood-New Brunswick, Nj",,,,False,,,
+29820,"Las Vegas-Henderson-North Las Vegas, Nv",,,,False,,,
+30780,"Little Rock-North Little Rock-Conway, Ar","Little Rock-North Little Rock-Conway, Ar",1.0,30780,True,,,
+31084,"Los Angeles-Long Beach-Glendale, Ca","Los Angeles-Long Beach-Anaheim, Ca",0.8115942028985508,31080,False,,,
+31140,"Louisville/Jefferson County, Ky-In","Louisville/Jefferson County, Ky-In",1.0,31140,True,,,
+31924,"Marietta, Ga","Marietta, Oh",0.8333333333333334,31930,False,,,
+32820,"Memphis, Tn-Ms-Ar","Memphis, Tn-Ms-Ar",1.0,32820,True,,,
+33124,"Miami-Miami Beach-Kendall, Fl",,,,False,,,
+33340,"Milwaukee-Waukesha, Wi","Milwaukee-Waukesha, Wi",1.0,33340,True,,,
+33460,"Minneapolis-St. Paul-Bloomington, Mn-Wi","Minneapolis-St. Paul-Bloomington, Mn-Wi",1.0,33460,True,,,
+33874,"Montgomery County-Bucks County-Chester County, Pa",,,,False,,,
+34980,"Nashville-Davidson--Murfreesboro--Franklin, Tn","Nashville-Davidson--Murfreesboro--Franklin, Tn",1.0,34980,True,,,
+35004,"Nassau County-Suffolk County, Ny",,,,False,,,
+35084,"Newark, Nj",,,,False,,,
+35380,"New Orleans-Metairie, La","New Orleans-Metairie, La",1.0,35380,True,,,
+35614,"New York-Jersey City-White Plains, Ny-Nj",,,,False,,,
+35840,"North Port-Bradenton-Sarasota, Fl",,,,False,,,
+36084,"Oakland-Fremont-Berkeley, Ca",,,,False,,,
+36420,"Oklahoma City, Ok","Oklahoma City, Ok",1.0,36420,True,,,
+36540,"Omaha, Ne-Ia",,,,False,,,
+36740,"Orlando-Kissimmee-Sanford, Fl","Orlando-Kissimmee-Sanford, Fl",1.0,36740,True,,,
+37100,"Oxnard-Thousand Oaks-Ventura, Ca","Oxnard-Thousand Oaks-Ventura, Ca",1.0,37100,True,,,
+37964,"Philadelphia, Pa",,,,False,,,
+38060,"Phoenix-Mesa-Chandler, Az","Phoenix-Mesa-Chandler, Az",1.0,38060,True,,,
+38300,"Pittsburgh, Pa","Pittsburgh, Pa",1.0,38300,True,,,
+38900,"Portland-Vancouver-Hillsboro, Or-Wa","Portland-Vancouver-Hillsboro, Or-Wa",1.0,38900,True,,,
+39300,"Providence-Warwick, Ri-Ma","Providence-Warwick, Ri-Ma",1.0,39300,True,,,
+39340,"Provo-Orem-Lehi, Ut","Provo-Orem, Ut",0.8484848484848485,39340,False,,,
+39580,"Raleigh-Cary, Nc","Raleigh-Cary, Nc",1.0,39580,True,,,
+40060,"Richmond, Va","Richmond, Va",1.0,40060,True,,,
+40140,"Riverside-San Bernardino-Ontario, Ca","Riverside-San Bernardino-Ontario, Ca",1.0,40140,True,,,
+40380,"Rochester, Ny","Rochester, Ny",1.0,40380,True,,,
+40900,"Sacramento-Roseville-Folsom, Ca","Sacramento-Roseville-Folsom, Ca",1.0,40900,True,,,
+41180,"St. Louis, Mo-Il","St. Louis, Mo-Il",1.0,41180,True,,,
+41304,"St. Petersburg-Clearwater-Largo, Fl","Tampa-St. Petersburg-Clearwater, Fl",0.8285714285714286,45300,False,,,
+41620,"Salt Lake City-Murray, Ut","Salt Lake City, Ut",0.8372093023255814,41620,False,,,
+41700,"San Antonio-New Braunfels, Tx","San Antonio-New Braunfels, Tx",1.0,41700,True,,,
+41740,"San Diego-Chula Vista-Carlsbad, Ca","San Diego-Chula Vista-Carlsbad, Ca",1.0,41740,True,,,
+41884,"San Francisco-San Mateo-Redwood City, Ca",,,,False,,,
+41940,"San Jose-Sunnyvale-Santa Clara, Ca","San Jose-Sunnyvale-Santa Clara, Ca",1.0,41940,True,,,
+42644,"Seattle-Bellevue-Kent, Wa",,,,False,,,
+44700,"Stockton-Lodi, Ca","Stockton, Ca",0.8275862068965517,44700,False,,,
+45104,"Tacoma-Lakewood, Wa",,,,False,,,
+45294,"Tampa, Fl",,,,False,,,
+46060,"Tucson, Az","Tucson, Az",1.0,46060,True,,,
+46140,"Tulsa, Ok","Tulsa, Ok",1.0,46140,True,,,
+47260,"Virginia Beach-Chesapeake-Norfolk, Va-Nc",,,,False,,,
+47664,"Warren-Troy-Farmington Hills, Mi",,,,False,,,
+47764,"Washington, Dc-Md","Washington, Nc",0.8387096774193549,47820,False,,,
+48424,"West Palm Beach-Boca Raton-Delray Beach, Fl",,,,False,,,
+48864,"Wilmington, De-Md-Nj",,,,False,,,
+49340,"Worcester, Ma","Worcester, Ma-Ct",0.896551724137931,49340,False,,,
+11244,"Anaheim-Santa Ana-Irvine, Ca",,,,,"Santa Maria-Santa Barbara, Ca",0.5614035087719298,42200
+11694,"Arlington-Alexandria-Reston, Va-Wv",,,,,"Washington-Arlington-Alexandria, Dc-Va-Md-Wv",0.6923076923076923,47900
+12054,"Atlanta-Sandy Springs-Roswell, Ga",,,,,"Atlanta-Sandy Springs-Alpharetta, Ga",0.782608695652174,12060
+12420,"Austin-Round Rock-San Marcos, Tx",,,,,"Austin-Round Rock-Georgetown, Tx",0.71875,12420
+14454,"Boston, Ma",,,,,"Easton, Md",0.7,20660
+15764,"Cambridge-Newton-Framingham, Ma",,,,,"Boston-Cambridge-Newton, Ma-Nh",0.6557377049180327,14460
+16984,"Chicago-Naperville-Schaumburg, Il",,,,,"Chicago-Naperville-Elgin, Il-In-Wi",0.7164179104477612,16980
+19124,"Dallas-Plano-Irving, Tx",,,,,"Dallas-Fort Worth-Arlington, Tx",0.5555555555555556,19100
+19430,"Dayton-Kettering-Beavercreek, Oh",,,,,"Dayton-Kettering, Oh",0.7692307692307693,19430
+19740,"Denver-Aurora-Centennial, Co",,,,,"Denver-Aurora-Lakewood, Co",0.7037037037037037,19740
+19804,"Detroit-Dearborn-Livonia, Mi",,,,,"Detroit-Warren-Dearborn, Mi",0.7272727272727273,19820
+20994,"Elgin, Il",,,,,"Dixon, Il",0.6666666666666666,19940
+21794,"Everett, Wa",,,,,"Aberdeen, Wa",0.6086956521739131,10140
+23104,"Fort Worth-Arlington-Grapevine, Tx",,,,,"Dallas-Fort Worth-Arlington, Tx",0.7384615384615385,19100
+23224,"Frederick-Gaithersburg-Bethesda, Md",,,,,"Fredericksburg, Tx",0.6037735849056604,23240
+25540,"Hartford-West Hartford-East Hartford, Ct",,,,,"Hartford-East Hartford-Middletown, Ct",0.6753246753246753,25540
+26420,"Houston-Pasadena-The Woodlands, Tx",,,,,"Houston-The Woodlands-Sugar Land, Tx",0.7142857142857143,26420
+29484,"Lakewood-New Brunswick, Nj",,,,,"Brunswick, Ga",0.5641025641025641,15260
+29820,"Las Vegas-Henderson-North Las Vegas, Nv",,,,,"Las Vegas-Henderson-Paradise, Nv",0.7887323943661971,29820
+33124,"Miami-Miami Beach-Kendall, Fl",,,,,"Miami-Fort Lauderdale-Pompano Beach, Fl",0.5294117647058824,33100
+33874,"Montgomery County-Bucks County-Chester County, Pa",,,,,"Macon-Bibb County, Ga",0.42857142857142855,31420
+35004,"Nassau County-Suffolk County, Ny",,,,,"Macon-Bibb County, Ga",0.49056603773584906,31420
+35084,"Newark, Nj",,,,,"New Bern, Nc",0.6363636363636364,35100
+35614,"New York-Jersey City-White Plains, Ny-Nj",,,,,"New York-Newark-Jersey City, Ny-Nj-Pa",0.7012987012987013,35620
+35840,"North Port-Bradenton-Sarasota, Fl",,,,,"North Port-Sarasota-Bradenton, Fl",0.7272727272727273,35840
+36084,"Oakland-Fremont-Berkeley, Ca",,,,,"San Francisco-Oakland-Berkeley, Ca",0.6451612903225806,41860
+36540,"Omaha, Ne-Ia",,,,,"Omaha-Council Bluffs, Ne-Ia",0.6153846153846154,36540
+37964,"Philadelphia, Pa",,,,,"New Philadelphia-Dover, Oh",0.6666666666666666,35420
+41884,"San Francisco-San Mateo-Redwood City, Ca",,,,,"San Francisco-Oakland-Berkeley, Ca",0.6216216216216216,41860
+42644,"Seattle-Bellevue-Kent, Wa",,,,,"Seattle-Tacoma-Bellevue, Wa",0.7692307692307693,42660
+45104,"Tacoma-Lakewood, Wa",,,,,"Denver-Aurora-Lakewood, Co",0.5777777777777777,19740
+45294,"Tampa, Fl",,,,,"Ocala, Fl",0.6666666666666666,36100
+47260,"Virginia Beach-Chesapeake-Norfolk, Va-Nc",,,,,"Virginia Beach-Norfolk-Newport News, Va-Nc",0.7073170731707317,47260
+47664,"Warren-Troy-Farmington Hills, Mi",,,,,"Farmington, Mo",0.5652173913043478,22100
+48424,"West Palm Beach-Boca Raton-Delray Beach, Fl",,,,,"Deltona-Daytona Beach-Ormond Beach, Fl",0.5432098765432098,19660
+48864,"Wilmington, De-Md-Nj",,,,,"Wilmington, Nc",0.7647058823529411,48900
