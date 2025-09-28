@@ -93,13 +93,18 @@ if __name__ == "__main__":
     ensure_dirs()
     
     income_gdf = get_income_geojson()
+    print("Got income GeoDataFrame with columns:", income_gdf.columns.tolist())
+    
     hpi_gdf = get_hpi_geojson()
+    print("got HPI GeoDataFrame with columns:", hpi_gdf.columns.tolist())
+    
     if not check_CRS(income_gdf, hpi_gdf):
         raise ValueError("CRS mismatch between income and HPI GeoDataFrames.")
     if not check_merge_columns(income_gdf, hpi_gdf, on=["county_fips_full", "year"]):
         raise ValueError("Merge columns missing in one of the GeoDataFrames.")
     
     merged_gdf = income_gdf.merge(hpi_gdf, on=["county_fips_full", "year"], suffixes=('_income', '_hpi'))
+    print("Successfully merged GeoDataFrames. Merged columns:", merged_gdf.columns.tolist())
     output_geojson_path = os.path.join(PATHS["geo_dir"], "income_hpi_at_county.geojson")
     merged_gdf.to_file(output_geojson_path, driver="GeoJSON")
     print(f"Merged GeoDataFrame saved to {output_geojson_path}")
