@@ -40,6 +40,9 @@ PRIMARY_METRIC_PREFERENCE = [
     re.compile(r"hpi", re.I),
 ]
 
+RESULTS_COLUMS = ['hpi', 'chg1', 'yoy']
+YEARS = list(range(1989, 2025))
+
 YOY_PERIODS = {"A": 1}
 
 
@@ -247,10 +250,11 @@ def main():
         with open(os.path.join(PATHS["quality_dir"], "qa_error.json"), "w") as f:
             json.dump({"error": "date_construct_failed", "profile": profile}, f, indent=2)
         sys.exit(3)
-
+    df = df.loc[df.year.isin(YEARS)].copy() # Only use years in the defined range
+    df = df.drop(columns=['hpi_with_1990_base', 'hpi_with_2000_base'], errors='ignore')
     # Determine primary metric column (prefer 'hpi')
     # Coerce potential metric columns to numeric
-    for c in ["hpi", "hpi_with_1990_base", "hpi_with_2000_base", "annual_change"]:
+    for c in ["hpi"]:#, "hpi_with_1990_base", "hpi_with_2000_base", "annual_change"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
@@ -303,7 +307,7 @@ def main():
         "n_counties": int(long_df["county_fips_full"].nunique()),
         "years": sorted(pd.unique(long_df["year"]).tolist()),
     }
-    with open(os.path.join(PATHS["quality_dir"], "profile.json"), "w") as f:
+    with open(os.path.join(PATHS["quality_dir"], "hpi_county_geo_profile.json"), "w") as f:
         json.dump(prof, f, indent=2)
 
     # Phase 4: Geometry join (using data/geo/counties.geojson)
