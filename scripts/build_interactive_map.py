@@ -14,12 +14,12 @@ from shapely import wkb
 # Config and paths
 # -----------------------------
 ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-DEFAULT_PARQUET = os.path.join(ROOT, "data", "processed", "income_hpi_at_county.parquet")
+DEFAULT_PARQUET = os.path.join(ROOT, "data", "processed", "hpi_income_metrics.parquet")
 PATHS = {
     "shapefiles_dir": os.path.join(ROOT, "shapefiles"),
     "geo_dir": os.path.join(ROOT, "data", "geo"),
     "counties_geojson": os.path.join(ROOT, "data", "geo", "counties.geojson"),
-    "merged_parquet": os.path.join(ROOT, "data", "processed", "income_hpi_at_county.parquet"),
+    "merged_parquet": os.path.join(ROOT, "data", "processed", "income_rent_at_county.parquet"),
 }
 
 
@@ -27,12 +27,12 @@ PATHS = {
 NUMERIC_COLS = [
     "median_household_income",
     "income_change",
-    "hpi_value",
-    "hpi_chg1",
+    "RAI",
+    "HAI"
 ]
 ID_COLS = [
     "county_fips_full",
-    "county_name_hpi",
+    "county_name",
     "year",
 ]
 
@@ -253,7 +253,7 @@ def main():
         df_year = df.copy()
         sel_year = None
 
-    value_cols = _detect_value_columns(gdf)
+    value_cols = _detect_value_columns(df_year)
     if value_cols:
         sel_metric = st.sidebar.selectbox("Color by", value_cols, index=0)
     else:
@@ -282,10 +282,8 @@ def main():
 
     gdf_year = gdf.merge(df_year, on="county_fips_full", how="left")
 
-    gdf_year['geometry'] = gdf_year['geometry_x']
-    gdf_year = gdf_year.drop(columns=['geometry_x','geometry_y'])
     gdf_year = gdf_year[~gdf_year["geometry"].isna()].copy()
-    gdf_year = gdf_year[~(gdf_year['hpi_value'] == None)].copy()
+    # gdf_year = gdf_year[~(gdf_year['hpi_value'] == None)].copy()
 
     if gdf_year.empty:
         st.warning("No geometries found after merging with county shapes.")
@@ -295,14 +293,14 @@ def main():
     # Prepare tooltip html
     def tooltip_html(metric: Optional[str]) -> str:
         parts = []
-        if "county_name_hpi" in df_year.columns:
-            parts.append("County: {county_name_hpi}")
-        if "hpi_value" in df_year.columns:
-            parts.append("<b>{hpi_value}</b>")
+        if "county_name" in df_year.columns:
+            parts.append("County: {county_name}")
+        if "HAI" in df_year.columns:
+            parts.append("Housing Affordability Index: {HAI}")
+        if "RAI" in df_year.columns:
+            parts.append("Rent Affordability Index: {RAI}")
         if "year" in df_year.columns:
             parts.append("Year: {year}")
-        if "hpi_chg1" in df_year.columns:
-            parts.append("YoY: {hpi_chg1}%")
         if "median_household_income" in df_year.columns:
             parts.append("Median HH Income: ${median_household_income}")
         if "income_change" in df_year.columns:
@@ -310,7 +308,7 @@ def main():
         if metric is not None and metric in df_year.columns:
             parts.append(f"{metric}: {{{metric}}}")
         # add a couple of known extras if present
-        for extra in ["median_household_income", "income_change", "hpi_value", "hpi_chg1"]:
+        for extra in ["median_household_income", "income_change",'median_home_value','median_gross_rent','HAI','RAI']:
             if extra == metric:
                 continue
             if extra in df_year.columns:
