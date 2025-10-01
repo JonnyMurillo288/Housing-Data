@@ -1,8 +1,9 @@
 # Housing & Rent Affordability Project (WIP)
 
 This project is a **work in progress** exploring long-term housing affordability trends at the **U.S. county level**.  
-We aim to build a consistent panel from the **1950s to the present**, using **Decennial Census** (historical values) and the **American Community Survey (ACS)** for modern data.  
+Aiming to build a consistent panel from the **1950s to the present**, using **Decennial Census** (historical values) and the **American Community Survey (ACS)** for modern data.  
 
+![County Housing Affordability Map](https://github.com/JonnyMurillo288/Housing-Data/blob/main/figures/maps/10_01_Draft_HAI.png?raw=true)
 ---
 
 ## Core Metrics
