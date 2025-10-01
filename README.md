@@ -58,6 +58,7 @@ Users will be able to view:
 - **Next steps:**  
   - Mapping & GeoJSON integration  
   - Dashboard visualization  
-  - Data validation & cleaning  
+  - Data validation & cleaning
+  - Adding data beyond year 2000 (Manual HPMS Downloads)
 
 ---
