@@ -12,9 +12,6 @@ We aim to build a consistent panel from the **1950s to the present**, using **De
 HAI = \frac{Median\ Home\ Value}{Median\ Household\ Income}
 \]
 
-- **Absolute HAI:** When true median home prices are available.  
-- **Indexed HAI:** When using income vs. FHFA HPI indices (tracks *relative growth* instead of absolute affordability).  
-
 ### Rent Affordability Index (RAI)  
 \[
 RAI = \frac{Median\ Household\ Income}{Median\ Gross\ Rent}
