@@ -64,6 +64,17 @@ def data_quality_checks(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def get_monthly_income(df: pd.DataFrame) -> pd.DataFrame:
+    # Assuming df has a column 'median_household_income' which is annual income
+    # This function will convert it to monthly income so we can compare to rent in an understandble number
+    if 'median_household_income' not in df.columns:
+        raise ValueError("DataFrame must contain 'median_household_income' column")
+
+    # Convert annual income to monthly income
+    df['median_monthly_income'] = df['median_household_income'] / 12
+
+    return df
+
 def calculate_hai(df: pd.DataFrame) -> pd.DataFrame:
     # Assuming df has columns 'median_household_income' and 'median_home_price'
     if 'median_household_income' not in df.columns or 'median_home_value' not in df.columns:
@@ -79,11 +90,11 @@ def calculate_hai(df: pd.DataFrame) -> pd.DataFrame:
 
 def calculate_rai(df: pd.DataFrame) -> pd.DataFrame:
     # Assuming df has columns 'median_gross_rent' and 'median_home_price'
-    if 'median_gross_rent' not in df.columns or 'median_home_value' not in df.columns:
+    if 'median_gross_rent' not in df.columns or 'median_monthly_income' not in df.columns:
         raise ValueError("DataFrame must contain 'median_gross_rent' and 'median_home_value' columns")
 
     # Calculate RAI
-    df['RAI'] = (df['median_household_income'] / df['median_gross_rent']) * 100
+    df['RAI'] = (df['median_monthly_income'] / df['median_gross_rent']) * 100
 
     # Handle potential division by zero or NaN values
     df['RAI'].replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -136,6 +147,7 @@ def main():
     # We have in 1990 median income. Why not compare that over this time period instead of the full as weird assumptions fuck
     
     # df = calculate_indexed_hai(df)
+    df = get_monthly_income(df)
     df = calculate_rai(df)
     df = calculate_hai(df)
     

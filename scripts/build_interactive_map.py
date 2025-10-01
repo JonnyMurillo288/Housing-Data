@@ -124,6 +124,23 @@ def _detect_value_columns(gdf: "gpd.GeoDataFrame") -> List[str]:
     return cols
 
 
+''' This function will take in two years from the user and then calculate the difference in HAI or RAI between the two years
+    INPUTS:
+    df - dataframe with year, county_fips_full, and value_col
+    year1 - first year to compare
+    year2 - second year to compare
+    value_col - column name of value to compare
+    change_col - column name of new column to store the change
+'''
+def calculate_change(df: pd.DataFrame, year1: int, year2: int, value_col: str, change_col: str) -> pd.DataFrame:
+    df1 = df[df['year'] == year1][['county_fips_full', value_col]].rename(columns={value_col: f'{value_col}_{year1}'})
+    df2 = df[df['year'] == year2][['county_fips_full', value_col]].rename(columns={value_col: f'{value_col}_{year2}'})
+    df_merged = pd.merge(df1, df2, on='county_fips_full', how='inner')
+    df_merged[change_col] = ((df_merged[f'{value_col}_{year2}'] - df_merged[f'{value_col}_{year1}']) / df_merged[f'{value_col}_{year1}']) * 100
+    df = pd.merge(df, df_merged[['county_fips_full', change_col]], on='county_fips_full', how='left')
+    return df
+
+
 def _compute_color_scale(series: pd.Series, n_bins: int = 9, diverging: bool = False) -> pd.DataFrame:
     """Compute RGBA colors for values in a series using a simple color ramp.
 
@@ -214,6 +231,18 @@ def main():
         df = _load_dataframe()
     if 'period' in df.columns:    
         df = df.drop(columns=['period'])
+    
+    # Round numeric columns for display
+    cols_to_round = [
+    "HAI",
+    "RAI",
+    "median_household_income",
+    "income_change",
+    "median_home_value",
+    "median_gross_rent"
+]
+
+    df[cols_to_round] = df[cols_to_round].round(2)
 
     # Ensure expected columns
     missing_ids = [c for c in ["year", "county_fips_full"] if c not in df.columns]
@@ -243,23 +272,69 @@ def main():
             st.error(f"Could not reproject geometry to EPSG:4326: {e}")
             
     # Sidebar controls
-    st.sidebar.header("Filters")
+#     st.sidebar.header("Filters")
+#     if years:
+#         sel_year = st.sidebar.selectbox("Year", years, index=len(years) - 1)
+#         df_year = df[df["year"] == sel_year].copy()
+#     else:
+#         st.sidebar.info("No 'year' column found; showing all data.")
+#         df_year = df.copy()
+#         sel_year = None
+        
+#     # View mode: single year or compare two years    
+#     mode = st.radio(
+#     "View mode:",
+#     ["Single year", "Compare two years"]
+# )
+    # -----------------
+    # Sidebar controls
+    # Have user select single year or compare two years
+    # if single year, show a dropdown of years
+    # if compare two years, show two dropdowns of years and a dropdown of metrics to compare
+    # -----------------
+    
     years = sorted([int(y) for y in df["year"].dropna().unique()]) if "year" in df.columns else []
-    if years:
-        sel_year = st.sidebar.selectbox("Year", years, index=len(years) - 1)
-        df_year = df[df["year"] == sel_year].copy()
-    else:
-        st.sidebar.info("No 'year' column found; showing all data.")
-        df_year = df.copy()
-        sel_year = None
+    
+    st.sidebar.header("Filters")
+    mode = st.sidebar.radio(
+    "View mode:",
+    ["Single year", "Compare two years"], 
+    index=0  # default to "Single year"
+)
+    
+    # Get the numeric columns available for coloring and comparing
+    value_cols = _detect_value_columns(df)
+    
+    if mode == "Single year":
+        year = st.sidebar.selectbox("Select a year", years, index=len(years)-1)
+        df_year = df[df["year"] == year].copy()
+        st.write(f"📊 Showing data for **{year}**")
+        if value_cols:
+            sel_metric = st.sidebar.selectbox("Color by", value_cols, index=0)
+        else:
+            sel_metric = None
+            st.sidebar.info("No numeric columns detected to color by.")
+    
+    elif mode == "Compare two years":
+        col1, col2 = st.columns(2)
+        with col1:
+            year1 = st.sidebar.selectbox("Select Year 1", years, index=0, key="year1")
+        with col2:
+            year2 = st.sidebar.selectbox("Select Year 2", years, index=len(years)-1, key="year2")
 
-    value_cols = _detect_value_columns(df_year)
-    if value_cols:
-        sel_metric = st.sidebar.selectbox("Color by", value_cols, index=0)
-    else:
-        sel_metric = None
-        st.sidebar.info("No numeric columns detected to color by.")
+        if year2 <= year1:
+            st.error("⚠️ Please make sure Year 2 is greater than Year 1.")
+        else:
+            sel_metric = st.sidebar.selectbox("Select a metric to compare", value_cols)
+            st.success(f"Comparing **{sel_metric}** from {year1} → {year2}")
 
+            # Pair down to the two years
+            df_year = df[(df["year"] == year1) | (df["year"] == year2)].copy()
+            # Calculate the percentage change and add as a new column
+            df_year = calculate_change(df_year,year1,year2,sel_metric,f'{sel_metric}_change')
+
+    
+    
     st.sidebar.caption("Tip: Hover polygons to see detailed attributes in the tooltip.")
 
     if df_year.empty:
@@ -290,31 +365,62 @@ def main():
         return
     
     # st.write(gdf_year.columns)
-    # Prepare tooltip html
-    def tooltip_html(metric: Optional[str]) -> str:
-        parts = []
-        if "county_name" in df_year.columns:
-            parts.append("County: {county_name}")
-        if "HAI" in df_year.columns:
-            parts.append("Housing Affordability Index: {HAI}")
-        if "RAI" in df_year.columns:
-            parts.append("Rent Affordability Index: {RAI}")
-        if "year" in df_year.columns:
-            parts.append("Year: {year}")
-        if "median_household_income" in df_year.columns:
-            parts.append("Median HH Income: ${median_household_income}")
-        if "income_change" in df_year.columns:
-            parts.append("Income Change: {income_change}%")
-        if metric is not None and metric in df_year.columns:
-            parts.append(f"{metric}: {{{metric}}}")
-        # add a couple of known extras if present
-        for extra in ["median_household_income", "income_change",'median_home_value','median_gross_rent','HAI','RAI']:
-            if extra == metric:
-                continue
-            if extra in df_year.columns:
-                parts.append(f"{extra}: {{{extra}}}")
-        return "<br/>".join(parts)
 
+    def tooltip_html(df_year, metric: Optional[str], year1: Optional[int] = None, year2: Optional[int] = None, compare_mode: bool = False) -> str:
+        parts = []
+        
+        # Build a formatted % change column (safe for missing values)
+        if metric is not None and f"{metric}_change" in df_year.columns:
+            df_year[f"{metric}_change_fmt"] = df_year[f"{metric}_change"].map(
+                lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A"
+            )
+
+        if compare_mode:
+            # ----------------------------
+            # TWO-YEAR COMPARISON TOOLTIP
+            # ----------------------------
+            if "county_name" in df_year.columns:
+                parts.append("County: {county_name}")
+            if metric is not None and metric in df_year.columns:
+                # Year1 + Year2 values
+                if year1 is not None and f"{metric}_year1" in df_year.columns:
+                    parts.append(f"{metric} ({year1}): {{{metric}_year1}}")
+                if year2 is not None and f"{metric}_year2" in df_year.columns:
+                    parts.append(f"{metric} ({year2}): {{{metric}_year2}}")
+                # Percent change
+                parts.append(f"{metric} % change: {{{metric}_change_fmt}}")
+
+            if metric == "RAI" and "median_gross_rent" in df_year.columns:
+                parts.append("Rental Price: ${median_gross_rent}")
+            if metric == "HAI" and "median_home_value" in df_year.columns:
+                parts.append("Median Home Price: ${median_home_value}")
+            if "median_household_income" in df_year.columns:
+                parts.append("Median HH Income: ${median_household_income}")
+
+        else:
+            # ----------------------------
+            # SINGLE-YEAR TOOLTIP (full data)
+            # ----------------------------
+            if "county_name" in df_year.columns:
+                parts.append("County: {county_name}")
+            if "HAI" in df_year.columns:
+                parts.append("Housing Affordability Index: {HAI}")
+            if "RAI" in df_year.columns:
+                parts.append("Rent Affordability Index: {RAI}")
+            if "year" in df_year.columns:
+                parts.append("Year: {year}")
+            if "median_household_income" in df_year.columns:
+                parts.append("Median HH Income: ${median_household_income}")
+            if "income_change" in df_year.columns:
+                parts.append("Income Change: {income_change}%")
+            if metric is not None and metric in df_year.columns:
+                parts.append(f"{metric}: {{{metric}}}")
+
+        return "<br/>".join(parts)
+    # ----------------------------
+    # RENDER MAP
+    # ----------------------------
+    st.subheader("County Map")
     
     # Convert to GeoJSON (properties include _fill_color and all columns)
     st.write(gdf_year.shape)
@@ -347,15 +453,22 @@ def main():
         get_line_color=[80, 80, 80],
         line_width_min_pixels=0.5,
         opacity=0.75,
+    )    
+    # Define the initial view state
+    view_state = pdk.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=8,          # adjust as needed
+        pitch=0,
+        bearing=0
     )
-    
     # st.write("Geometry type in current view:", type(gdf.geometry.iloc[0]))
     # st.write("First Geometry", gdf.geometry.iloc[0])
     # st.write("Number of Valid Geometries:", gdf.geometry.notnull().sum())
     
-    
+    compare_mode = mode == "Compare two years"
     tooltip = {
-        "html": tooltip_html(sel_metric),
+        "html": tooltip_html(df_year,metric = sel_metric, compare_mode = compare_mode),
         "style": {
             "backgroundColor": "#f0f0f0",
             "color": "#111",
