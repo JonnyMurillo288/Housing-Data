@@ -1,2 +1,3 @@
 *.geojson
 *.parquet
+.Rproj.user

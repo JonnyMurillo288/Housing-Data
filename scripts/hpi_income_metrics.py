@@ -81,12 +81,13 @@ def calculate_hai(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("DataFrame must contain 'median_household_income' and 'median_home_value' columns")
 
     # Calculate HAI
-    df['HAI'] = (df['median_household_income'] / df['median_home_value']) * 100
+    df['HAI'] = (df['median_home_value'] / df['median_household_income'])
 
     # Handle potential division by zero or NaN values
     df['HAI'].replace([np.inf, -np.inf], np.nan, inplace=True)
 
     return df
+
 
 def calculate_rai(df: pd.DataFrame) -> pd.DataFrame:
     # Assuming df has columns 'median_gross_rent' and 'median_home_price'
@@ -94,7 +95,7 @@ def calculate_rai(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("DataFrame must contain 'median_gross_rent' and 'median_home_value' columns")
 
     # Calculate RAI
-    df['RAI'] = (df['median_monthly_income'] / df['median_gross_rent']) * 100
+    df['RAI'] = (df['median_monthly_income'] / df['median_gross_rent'])
 
     # Handle potential division by zero or NaN values
     df['RAI'].replace([np.inf, -np.inf], np.nan, inplace=True)

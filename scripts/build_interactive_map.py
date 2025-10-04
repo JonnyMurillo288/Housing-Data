@@ -8,7 +8,7 @@ import geopandas as gpd
 import streamlit as st
 import pydeck as pdk
 from shapely import wkb
-
+import numpy as np
 
 # -----------------------------
 # Config and paths
@@ -124,24 +124,35 @@ def _detect_value_columns(gdf: "gpd.GeoDataFrame") -> List[str]:
     return cols
 
 
-''' This function will take in two years from the user and then calculate the difference in HAI or RAI between the two years
-    INPUTS:
-    df - dataframe with year, county_fips_full, and value_col
-    year1 - first year to compare
-    year2 - second year to compare
-    value_col - column name of value to compare
-    change_col - column name of new column to store the change
-'''
+
 def calculate_change(df: pd.DataFrame, year1: int, year2: int, value_col: str, change_col: str) -> pd.DataFrame:
+    ''' This function will take in two years from the user and then calculate the difference in HAI or RAI between the two years
+        INPUTS:
+        df - dataframe with year, county_fips_full, and value_col
+        year1 - first year to compare
+        year2 - second year to compare
+        value_col - column name of value to compare
+        change_col - column name of new column to store the change
+    ''' 
     df1 = df[df['year'] == year1][['county_fips_full', value_col]].rename(columns={value_col: f'{value_col}_{year1}'})
     df2 = df[df['year'] == year2][['county_fips_full', value_col]].rename(columns={value_col: f'{value_col}_{year2}'})
     df_merged = pd.merge(df1, df2, on='county_fips_full', how='inner')
     df_merged[change_col] = ((df_merged[f'{value_col}_{year2}'] - df_merged[f'{value_col}_{year1}']) / df_merged[f'{value_col}_{year1}']) * 100
-    df = pd.merge(df, df_merged[['county_fips_full', change_col]], on='county_fips_full', how='left')
+    df_merged[change_col] = df_merged[change_col].round(2)
+    df = pd.merge(
+        df,
+        df_merged[['county_fips_full', change_col, f'{value_col}_{year2}', f'{value_col}_{year1}']],
+        on='county_fips_full',
+        how='left',
+        suffixes=("", "_dup")
+    )
+    df = df.drop([c for c in df.columns if c.endswith("_dup")], axis=1)
+    # df['metric_year1'] = df[df[df['year'] == year1]][f'{value_col}_{year1}']
+    # df["metric_year2"] = df[f'{value_col}_{year2}']
     return df
 
 
-def _compute_color_scale(series: pd.Series, n_bins: int = 9, diverging: bool = False) -> pd.DataFrame:
+def _compute_color_scale(series: pd.Series, n_bins: int = 9, diverging: bool = False, reverse: bool = False) -> pd.DataFrame:
     """Compute RGBA colors for values in a series using a simple color ramp.
 
     Returns a DataFrame with columns [r, g, b, a] aligned to the input index.
@@ -157,12 +168,7 @@ def _compute_color_scale(series: pd.Series, n_bins: int = 9, diverging: bool = F
     if pd.isna(vmin) or pd.isna(vmax) or vmin == vmax:
         # Degenerate; single color
         rgba = pd.DataFrame(
-            {
-                "r": 100,
-                "g": 149,
-                "b": 237,
-                "a": 180,
-            },
+            {"r": 100, "g": 149, "b": 237, "a": 180},
             index=s.index,
         )
         return rgba
@@ -171,11 +177,14 @@ def _compute_color_scale(series: pd.Series, n_bins: int = 9, diverging: bool = F
     t = (s - vmin) / (vmax - vmin)
     t = t.clip(0, 1).fillna(0.0)
 
+    # 🔄 Reverse for RAI (or if explicitly requested)
+    if reverse:
+        t = 1.0 - t
+
     # Simple sequential ramp (light -> dark blue)
     def ramp_blue(x: float) -> Tuple[int, int, int]:
-        # interpolate between [247,251,255] and [8,48,107]
-        c0 = (247, 251, 255)
-        c1 = (8, 48, 107)
+        c0 = (247, 251, 255)  # light
+        c1 = (8, 48, 107)     # dark
         r = int(c0[0] + (c1[0] - c0[0]) * x)
         g = int(c0[1] + (c1[1] - c0[1]) * x)
         b = int(c0[2] + (c1[2] - c0[2]) * x)
@@ -183,14 +192,11 @@ def _compute_color_scale(series: pd.Series, n_bins: int = 9, diverging: bool = F
 
     # Diverging ramp (blue-white-red)
     def ramp_diverging(x: float) -> Tuple[int, int, int]:
-        # x in [0,1]; 0 -> blue, 0.5 -> white, 1 -> red
         if x < 0.5:
-            # blue -> white
             xr = x / 0.5
             c0 = (49, 130, 189)
             c1 = (255, 255, 255)
         else:
-            # white -> red
             xr = (x - 0.5) / 0.5
             c0 = (255, 255, 255)
             c1 = (202, 0, 32)
@@ -200,7 +206,7 @@ def _compute_color_scale(series: pd.Series, n_bins: int = 9, diverging: bool = F
         return r, g, b
 
     rgb = [ramp_diverging(x) if diverging else ramp_blue(x) for x in t]
-    rgba = pd.DataFrame(rgb, index=s.index, columns=["r", "g", "b"])  # type: ignore
+    rgba = pd.DataFrame(rgb, index=s.index, columns=["r", "g", "b"])
     rgba["a"] = 180
     return rgba
 
@@ -215,232 +221,147 @@ def _to_geojson_dict(gdf: "gpd.GeoDataFrame") -> dict:
 # Streamlit UI
 # -----------------------------
 
-'''
-Reworked version of the interactive map using Streamlit and PyDeck.
-Going to get the dataframe from the processed data
-Then going to allow the user to select a year and a metric to color by
-Then join the dataframe with counties geojson
-Then render the map with pydeck
-'''
+
+# Reworked version of the interactive map using Streamlit and PyDeck.
+# Going to get the dataframe from the processed data
+# Then going to allow the user to select a year and a metric to color by
+# Then join the dataframe with counties geojson
+# Then render the map with pydeck
 
 def main():    
-    st.set_page_config(page_title="County Income & HPI Map", layout="wide")
-    st.title("Interactive County Map: Income and HPI")
+    st.set_page_config(page_title="County Income & Housing Afforbility", layout="wide")
+    st.title("Interactive County Map: Median Income & Housing Affordability")
 
-    with st.spinner("Loading geospatial dataset..."):
+    # -----------------------------
+    # Load Data
+    # -----------------------------
+    with st.spinner("Loading datasets..."):
         df = _load_dataframe()
-    if 'period' in df.columns:    
-        df = df.drop(columns=['period'])
-    
-    # Round numeric columns for display
-    cols_to_round = [
-    "HAI",
-    "RAI",
-    "median_household_income",
-    "income_change",
-    "median_home_value",
-    "median_gross_rent"
-]
+        if 'period' in df.columns:    
+            df = df.drop(columns=['period'])
+        df = df.round(2)
 
-    df[cols_to_round] = df[cols_to_round].round(2)
+        gdf = gpd.read_file(PATHS["counties_geojson"])[["GEOID", "geometry"]].rename(columns={"GEOID": "county_fips_full"})
+        gdf['county_fips_full'] = gdf['county_fips_full'].astype(df['county_fips_full'].dtype)
 
-    # Ensure expected columns
-    missing_ids = [c for c in ["year", "county_fips_full"] if c not in df.columns]
-    if missing_ids:
-        st.warning(
-            "Missing expected identifier columns: " + ", ".join(missing_ids) + ". "
-            "The app will still try to render available data."
-        )
-
-    # Bring in the geometry from counties geojson if not present
-    gdf = gpd.read_file(PATHS["counties_geojson"])[["GEOID", "geometry"]].rename(columns={"GEOID": "county_fips_full"})
-    gdf['county_fips_full'] = gdf['county_fips_full'].astype(df['county_fips_full'].dtype)
-
-    # Ensure geometry is valid
-    if gdf.geometry.dtype == "object":
-        try:
-            gdf["geometry"] = gdf["geometry"].apply(wkb.loads)
-            gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs="EPSG:4326")
-        except Exception as e:
-            st.error(f"Could not restore geometry: {e}")
-    if gdf.crs is None:
-        gdf.set_crs("EPSG:4326", inplace=True)
-    elif gdf.crs.to_string() != "EPSG:4326":
-        try:
+        if gdf.crs is None:
+            gdf.set_crs("EPSG:4326", inplace=True)
+        elif gdf.crs.to_string() != "EPSG:4326":
             gdf = gdf.to_crs("EPSG:4326")
-        except Exception as e:
-            st.error(f"Could not reproject geometry to EPSG:4326: {e}")
-            
-    # Sidebar controls
-#     st.sidebar.header("Filters")
-#     if years:
-#         sel_year = st.sidebar.selectbox("Year", years, index=len(years) - 1)
-#         df_year = df[df["year"] == sel_year].copy()
-#     else:
-#         st.sidebar.info("No 'year' column found; showing all data.")
-#         df_year = df.copy()
-#         sel_year = None
-        
-#     # View mode: single year or compare two years    
-#     mode = st.radio(
-#     "View mode:",
-#     ["Single year", "Compare two years"]
-# )
-    # -----------------
-    # Sidebar controls
-    # Have user select single year or compare two years
-    # if single year, show a dropdown of years
-    # if compare two years, show two dropdowns of years and a dropdown of metrics to compare
-    # -----------------
-    
-    years = sorted([int(y) for y in df["year"].dropna().unique()]) if "year" in df.columns else []
-    
-    st.sidebar.header("Filters")
-    mode = st.sidebar.radio(
-    "View mode:",
-    ["Single year", "Compare two years"], 
-    index=0  # default to "Single year"
-)
-    
-    # Get the numeric columns available for coloring and comparing
+
+    years = sorted(df["year"].dropna().unique()) if "year" in df.columns else []
     value_cols = _detect_value_columns(df)
-    
+
+    # -----------------------------
+    # Sidebar Controls
+    # -----------------------------
+    st.sidebar.header("Filters")
+    mode = st.sidebar.radio("View mode:", ["Single year", "Compare two years"], index=0)
+
+    compare_mode = (mode == "Compare two years")
+
     if mode == "Single year":
         year = st.sidebar.selectbox("Select a year", years, index=len(years)-1)
         df_year = df[df["year"] == year].copy()
+        sel_metric = st.sidebar.selectbox("Color by", value_cols) if value_cols else None
         st.write(f"📊 Showing data for **{year}**")
-        if value_cols:
-            sel_metric = st.sidebar.selectbox("Color by", value_cols, index=0)
-        else:
-            sel_metric = None
-            st.sidebar.info("No numeric columns detected to color by.")
-    
-    elif mode == "Compare two years":
-        col1, col2 = st.columns(2)
-        with col1:
-            year1 = st.sidebar.selectbox("Select Year 1", years, index=0, key="year1")
-        with col2:
-            year2 = st.sidebar.selectbox("Select Year 2", years, index=len(years)-1, key="year2")
+
+    else:  # Compare two years
+        year1 = st.sidebar.selectbox("Select Year 1", years, index=0, key="year1")
+        year2 = st.sidebar.selectbox("Select Year 2", years, index=len(years)-1, key="year2")
 
         if year2 <= year1:
-            st.error("⚠️ Please make sure Year 2 is greater than Year 1.")
-        else:
-            sel_metric = st.sidebar.selectbox("Select a metric to compare", value_cols)
-            st.success(f"Comparing **{sel_metric}** from {year1} → {year2}")
+            st.error("⚠️ Please ensure Year 2 is greater than Year 1.")
+            return
 
-            # Pair down to the two years
-            df_year = df[(df["year"] == year1) | (df["year"] == year2)].copy()
-            # Calculate the percentage change and add as a new column
-            df_year = calculate_change(df_year,year1,year2,sel_metric,f'{sel_metric}_change')
-
+        sel_metric = st.sidebar.selectbox("Metric to compare", value_cols)
+        df_year = df[(df["year"] == year1) | (df["year"] == year2)].copy()
+        df_year = calculate_change(df_year, year1, year2, sel_metric, f"{sel_metric}_change")
+        df_year = calculate_change(df_year, year1, year2, "median_household_income", f"median_household_income_change")
+        df_year = calculate_change(df_year, year1, year2, "median_home_value", f"median_home_value_change")
+        df_year = calculate_change(df_year, year1, year2, "median_gross_rent", f"median_gross_rent_price_change")
+        df_year = calculate_change(df_year, year1, year2, "HAI", f"HAI_change")
+        df_year = calculate_change(df_year, year1, year2, "RAI", f"RAI_change")
+        
+        
+        desc = ""
+        if sel_metric == "HAI":
+            desc = " Housing Affordability Index"
+        elif sel_metric == "RAI":
+            desc = " Rent Affordability Index"
     
-    
-    st.sidebar.caption("Tip: Hover polygons to see detailed attributes in the tooltip.")
+        st.success(f"Comparing **{desc}** from {year1} → {year2}")
 
+    # -----------------------------
+    # Prepare Data for Map
+    # -----------------------------
     if df_year.empty:
-        st.warning("No records for the selected year.")
+        st.warning("No data for the selected filter.")
         return
 
-    # Compute colors
-    diverging = False
-    if sel_metric is not None:
-        # Consider diverging palette if data crosses zero (e.g., changes)
-        s = pd.to_numeric(df_year[sel_metric], errors="coerce")
+    metric_col = f"{sel_metric}_change" if compare_mode and sel_metric else sel_metric
+    if metric_col and metric_col in df_year.columns:
+        s = pd.to_numeric(df_year[metric_col], errors="coerce")
         diverging = (s.min(skipna=True) < 0) and (s.max(skipna=True) > 0)
-        rgba = _compute_color_scale(s, diverging=diverging)
+        if sel_metric in ["RAI", "RAI_change"]:
+            reverse = True
+        else:
+            reverse = False
+        rgba = _compute_color_scale(s, diverging=diverging,reverse=reverse)
         for ch in ["r", "g", "b", "a"]:
             df_year[f"_c_{ch}"] = rgba[ch].values
         df_year["_fill_color"] = df_year.apply(lambda r: [int(r["_c_r"]), int(r["_c_g"]), int(r["_c_b"]), int(r["_c_a"])], axis=1)
     else:
         df_year["_fill_color"] = [[100, 149, 237, 180]] * len(df_year)
 
-
     gdf_year = gdf.merge(df_year, on="county_fips_full", how="left")
-
-    gdf_year = gdf_year[~gdf_year["geometry"].isna()].copy()
-    # gdf_year = gdf_year[~(gdf_year['hpi_value'] == None)].copy()
-
+    gdf_year = gdf_year[~gdf_year.geometry.isna()].copy()
     if gdf_year.empty:
         st.warning("No geometries found after merging with county shapes.")
         return
+    # st.write("Valid geometries:", gdf_year.geometry.notnull().sum())
+    # st.write("Geometry types:", gdf_year.geometry.geom_type.value_counts())
     
-    # st.write(gdf_year.columns)
-
-    def tooltip_html(df_year, metric: Optional[str], year1: Optional[int] = None, year2: Optional[int] = None, compare_mode: bool = False) -> str:
-        parts = []
-        
-        # Build a formatted % change column (safe for missing values)
-        if metric is not None and f"{metric}_change" in df_year.columns:
-            df_year[f"{metric}_change_fmt"] = df_year[f"{metric}_change"].map(
-                lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A"
-            )
-
-        if compare_mode:
-            # ----------------------------
-            # TWO-YEAR COMPARISON TOOLTIP
-            # ----------------------------
-            if "county_name" in df_year.columns:
-                parts.append("County: {county_name}")
-            if metric is not None and metric in df_year.columns:
-                # Year1 + Year2 values
-                if year1 is not None and f"{metric}_year1" in df_year.columns:
-                    parts.append(f"{metric} ({year1}): {{{metric}_year1}}")
-                if year2 is not None and f"{metric}_year2" in df_year.columns:
-                    parts.append(f"{metric} ({year2}): {{{metric}_year2}}")
-                # Percent change
-                parts.append(f"{metric} % change: {{{metric}_change_fmt}}")
-
-            if metric == "RAI" and "median_gross_rent" in df_year.columns:
-                parts.append("Rental Price: ${median_gross_rent}")
-            if metric == "HAI" and "median_home_value" in df_year.columns:
-                parts.append("Median Home Price: ${median_home_value}")
-            if "median_household_income" in df_year.columns:
-                parts.append("Median HH Income: ${median_household_income}")
-
-        else:
-            # ----------------------------
-            # SINGLE-YEAR TOOLTIP (full data)
-            # ----------------------------
-            if "county_name" in df_year.columns:
-                parts.append("County: {county_name}")
-            if "HAI" in df_year.columns:
-                parts.append("Housing Affordability Index: {HAI}")
-            if "RAI" in df_year.columns:
-                parts.append("Rent Affordability Index: {RAI}")
-            if "year" in df_year.columns:
-                parts.append("Year: {year}")
-            if "median_household_income" in df_year.columns:
-                parts.append("Median HH Income: ${median_household_income}")
-            if "income_change" in df_year.columns:
-                parts.append("Income Change: {income_change}%")
-            if metric is not None and metric in df_year.columns:
-                parts.append(f"{metric}: {{{metric}}}")
-
-        return "<br/>".join(parts)
-    # ----------------------------
-    # RENDER MAP
-    # ----------------------------
-    st.subheader("County Map")
+    # Simplify geometries just a bit (optional)
+    gdf_year["geometry"] = gdf_year["geometry"].simplify(0.005, preserve_topology=True) 
     
-    # Convert to GeoJSON (properties include _fill_color and all columns)
-    st.write(gdf_year.shape)
-    gdf_year["geometry"] = gdf_year["geometry"].simplify(0.01, preserve_topology=True)
-    gj = _to_geojson_dict(gdf_year)
+    
+    def fmt_currency(x):
+        return f"${x:,.0f}" if pd.notnull(x) else "N/A"
 
-    # Determine initial view from bounds
-    try:
-        minx, miny, maxx, maxy = gdf_year.total_bounds
-        center_lat = (miny + maxy) / 2
-        center_lon = (minx + maxx) / 2
-        zoom = 4
-    except Exception:
-        center_lat, center_lon, zoom = 39.5, -98.35, 4
+    def fmt_ratio(x):
+        return f"{x:,.2f}" if pd.notnull(x) else "N/A"
+    
+    # ---- FORMAT ALL NUMERIC COLUMNS ----
+    gdf_year["median_household_income_fmt"] = gdf_year["median_household_income"].apply(fmt_currency)
+    gdf_year["median_gross_rent_fmt"]       = gdf_year["median_gross_rent"].apply(fmt_currency)
+    gdf_year["median_home_value_fmt"]       = gdf_year["median_home_value"].apply(fmt_currency)
+    gdf_year['HAI_change_fmt']              = gdf_year['HAI_change'].apply(fmt_ratio)
+    gdf_year['RAI_change_fmt']              = gdf_year['RAI_change'].apply(fmt_ratio)
 
-    # Build deck.gl layer
-    if pdk is None:
-        st.error("pydeck is required for rendering. Install via: pip install pydeck")
-        st.stop()
-    # st.write("Row count",len(gdf_year))
+    # Format compare-mode columns
+    if compare_mode:
+        for y in [year1, year2]:
+            if f"median_household_income_{y}" in gdf_year:
+                gdf_year[f"median_household_income_{y}_fmt"] = gdf_year[f"median_household_income_{y}"].apply(fmt_currency)
+            if f"median_home_value_{y}" in gdf_year:
+                gdf_year[f"median_home_value_{y}_fmt"] = gdf_year[f"median_home_value_{y}"].apply(fmt_currency)
+            if f"median_gross_rent_{y}" in gdf_year:
+                gdf_year[f"median_gross_rent_{y}_fmt"] = gdf_year[f"median_gross_rent_{y}"].apply(fmt_currency)
+            if f"HAI_{y}" in gdf_year:
+                gdf_year[f"HAI_{y}_fmt"] = gdf_year[f"HAI_{y}"].apply(fmt_ratio)
+            if f"RAI_{y}" in gdf_year:
+                gdf_year[f"RAI_{y}_fmt"] = gdf_year[f"RAI_{y}"].apply(fmt_ratio)
+
+    gj = _to_geojson_dict(gdf_year)    # st.json(gj["features"][0]["properties"])
+    
+    # -----------------------------
+    # Map View
+    # -----------------------------
+    minx, miny, maxx, maxy = gdf_year.total_bounds
+    center_lat = (miny + maxy) / 2
+    center_lon = (minx + maxx) / 2
+    zoom = 4.5
 
     layer = pdk.Layer(
         "GeoJsonLayer",
@@ -448,62 +369,148 @@ def main():
         pickable=True,
         stroked=True,
         filled=True,
-        extruded=False,
         get_fill_color="properties._fill_color",
         get_line_color=[80, 80, 80],
         line_width_min_pixels=0.5,
         opacity=0.75,
-    )    
-    # Define the initial view state
-    view_state = pdk.ViewState(
-        latitude=center_lat,
-        longitude=center_lon,
-        zoom=8,          # adjust as needed
-        pitch=0,
-        bearing=0
     )
-    # st.write("Geometry type in current view:", type(gdf.geometry.iloc[0]))
-    # st.write("First Geometry", gdf.geometry.iloc[0])
-    # st.write("Number of Valid Geometries:", gdf.geometry.notnull().sum())
     
-    compare_mode = mode == "Compare two years"
+    
+    # -----------------------------
+    # Tooltip setup
+    # -----------------------------
+    # Default tooltip
     tooltip = {
-        "html": tooltip_html(df_year,metric = sel_metric, compare_mode = compare_mode),
-        "style": {
-            "backgroundColor": "#f0f0f0",
-            "color": "#111",
-        },
+        "html": (
+            "<b>{county_name} County</b><br/>"
+            "Median Household Income: {median_household_income_fmt}<br/>"
+            "Median Rent: {median_gross_rent_fmt}<br/>"
+            "Median Home Value: {median_home_value_fmt}"
+        ),
+        "style": {"backgroundColor": "steelblue", "color": "white"}
     }
-    # st.write(gdf_year.head())
-    # st.map(gdf_year)
 
-    view_state = pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=zoom)
+    # Non-compare mode
+    if not compare_mode: 
+        if sel_metric == "HAI":
+            tooltip = {
+                "html": (
+                    "<b>{county_name} County</b><br/>"
+                    f"HAI: {{metric_value_fmt}}<br/>"
+                    "Median Income: {median_household_income_fmt}<br/>"
+                    "Median Home Value: {median_home_value_fmt}"
+                ),
+                "style": {"backgroundColor": "steelblue", "color": "white"}
+            }
+
+        elif sel_metric == "RAI":
+            tooltip = {
+                "html": (
+                    "<b>{county_name} County</b><br/>"
+                    f"RAI: {{metric_value_fmt}}<br/>"
+                    "Median Income: {median_household_income_fmt}<br/>"
+                    "Median Rent: {median_gross_rent_fmt}"
+                ),
+                "style": {"backgroundColor": "steelblue", "color": "white"}
+            }
+
+        else:  # Generic metric
+            tooltip = {
+                "html": (
+                    "<b>{county_name} County</b><br/>"
+                    f"{sel_metric}: {{metric_value_fmt}}<br/>"
+                    "Median Income: {median_household_income_fmt}"
+                ),
+                "style": {"backgroundColor": "steelblue", "color": "white"}
+            }
+
+    # Compare mode
+    if compare_mode:
+        if sel_metric == "HAI":
+            tooltip = {
+                "html": (
+                    f"<b>{{county_name}} County</b><br/>"
+                    f"HAI Change: {{HAI_change_fmt}}%<br/>"
+                    f"Year 1 ({year1}) HAI: {{HAI_{year1}_fmt}}<br/>"
+                    f"Year 2 ({year2}) HAI: {{HAI_{year2}_fmt}}<br/>"
+                    f"Median Income {year1}: {{median_household_income_{year1}_fmt}}<br/>"
+                    f"Median Income {year2}: {{median_household_income_{year2}_fmt}}<br/>"
+                    f"Median Home Value {year1}: {{median_home_value_{year1}_fmt}}<br/>"
+                    f"Median Home Value {year2}: {{median_home_value_{year2}_fmt}}"
+                ),
+                "style": {"backgroundColor": "steelblue", "color": "white"}
+            }
+
+        elif sel_metric == "RAI":
+            tooltip = {
+                "html": (
+                    f"<b>{{county_name}} County</b><br/>"
+                    f"RAI Change: {{RAI_change_fmt}}%<br/>"
+                    f"Year 1 ({year1}) RAI: {{RAI_{year1}_fmt}}<br/>"
+                    f"Year 2 ({year2}) RAI: {{RAI_{year2}_fmt}}<br/>"
+                    f"Median Income {year1}: {{median_household_income_{year1}_fmt}}<br/>"
+                    f"Median Income {year2}: {{median_household_income_{year2}_fmt}}<br/>"
+                    f"Median Rent {year1}: {{median_gross_rent_{year1}_fmt}}<br/>"
+                    f"Median Rent {year2}: {{median_gross_rent_{year2}_fmt}}"
+                ),
+                "style": {"backgroundColor": "steelblue", "color": "white"}
+            }
+
+        else:  # Comparing just income or another metric
+            tooltip = {
+                "html": (
+                    f"<b>{{county_name}} County</b><br/>"
+                    f"{sel_metric} {year1}: {{median_household_income_{year1}_fmt}}<br/>"
+                    f"{sel_metric} {year2}: {{median_household_income_{year2}_fmt}}"
+                ),
+                "style": {"backgroundColor": "steelblue", "color": "white"}
+            }
 
     r = pdk.Deck(
-    layers=[layer],
-    initial_view_state=view_state,
-    map_style="light",  # free, no token
-    tooltip=tooltip
+        layers=[layer],
+        initial_view_state=pdk.ViewState(
+            latitude=38.5,
+            longitude=-98.0,
+            zoom=3,   # adjust zoom level to taste
+            pitch=0,
+            bearing=0
+        ),
+        map_style=None,  # use default background
+        tooltip=tooltip,
     )
-    
-    
-    
+
+    st.subheader("County Map")
+    st.write("Hover over a county for details.")
+    if sel_metric is "HAI":
+        "HAI (Housing Affordability Index) is the ratio of the median home price divided by the median household income. A HAI of 3 means that the price of the median house in a county is 3x the median household income."
+    elif sel_metric is "RAI":
+        "RAI (Rent Affordability Index) is the ratio of Monthly median household income to the monthly median rent. A RAI of 3 means that a family with median income makes three times as much as the median monthly rent price."
     st.pydeck_chart(r, use_container_width=True)
 
-    # Legend-ish caption
-    if sel_metric is not None:
-        st.caption(
-            f"Color scale based on '{sel_metric}' for year {sel_year if sel_year is not None else 'All'}. "
-            + ("Diverging scale (blue-white-red) used." if diverging else "Sequential blue scale used.")
-        )
-
-    # Data table
-    with st.expander("Show data for selected year"):
-        # Show a neat subset: ids + metric(s)
+    # -----------------------------
+    # Data Table
+    # -----------------------------
+    with st.expander("Show data for selected year(s)"):
         cols_to_show = [c for c in ID_COLS if c in gdf_year.columns]
         other_cols = [c for c in gdf_year.columns if c not in cols_to_show + ["geometry"] and not c.startswith("_c_") and c != "_fill_color"]
         st.dataframe(gdf_year[cols_to_show + other_cols].reset_index(drop=True))
 
+    # Create a button for users to download the data as either csv or geojson
+    with st.expander("Download data"):
+        csv = gdf_year[cols_to_show + other_cols].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download data as CSV",
+            data=csv,
+            file_name='county_income_hpi_data.csv',
+            mime='text/csv',
+        )
+        geojson_str = json.dumps(gj)
+        st.download_button(
+            label="Download data as GeoJSON",
+            data=geojson_str,
+            file_name='county_income_hpi_data.geojson',
+            mime='application/geo+json',
+        )
 
 if __name__ == "__main__":
     # Allow running via `streamlit run scripts/build_interactive_map.py`
