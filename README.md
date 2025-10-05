@@ -12,14 +12,12 @@ It aims to build a consistent panel from the **1950s to the present**, combining
 ## Core Metrics
 
 ### Housing Affordability Index (HAI)
-\[
-\text{HAI} = \frac{\text{Median Home Value}}{\text{Median Household Income}}
-\]
+**Formula:**  
+`HAI = Median Home Value / Median Household Income`
 
 ### Rent Affordability Index (RAI)
-\[
-\text{RAI} = \frac{\text{Median Household Income}}{\text{Median Gross Rent}}
-\]
+**Formula:**  
+`RAI = Median Household Income / Median Gross Rent`
 
 - Uses **median gross rent** (rent + utilities) as reported by Census/ACS.  
 - Captures how much local incomes can cover typical rental costs.  
