@@ -18,7 +18,7 @@ DEFAULT_PARQUET = os.path.join(ROOT, "data", "processed", "hpi_income_metrics.pa
 PATHS = {
     "shapefiles_dir": os.path.join(ROOT, "shapefiles"),
     "geo_dir": os.path.join(ROOT, "data", "geo"),
-    "counties_geojson": os.path.join(ROOT, "data", "geo", "counties.geojson"),
+    "counties_geojson": os.path.join(ROOT, "data", "geo", "counties.parquet"),
     "merged_parquet": os.path.join(ROOT, "data", "processed", "income_rent_at_county.parquet"),
 }
 
