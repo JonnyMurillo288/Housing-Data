@@ -242,7 +242,7 @@ def main():
             df = df.drop(columns=['period'])
         df = df.round(2)
 
-        gdf = gpd.read_file(PATHS["counties_geojson"])[["GEOID", "geometry"]].rename(columns={"GEOID": "county_fips_full"})
+        gdf = gpd.read_parquet(PATHS["counties_geojson"])[["GEOID", "geometry"]].rename(columns={"GEOID": "county_fips_full"})
         gdf['county_fips_full'] = gdf['county_fips_full'].astype(df['county_fips_full'].dtype)
 
         if gdf.crs is None:
