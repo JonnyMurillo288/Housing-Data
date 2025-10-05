@@ -1,22 +1,24 @@
 # Housing & Rent Affordability Project (WIP)
 
+🔗 [Live Dashboard](https://us-housing-affordability.streamlit.app/)
+
 This project is a **work in progress** exploring long-term housing affordability trends at the **U.S. county level**.  
-Aiming to build a consistent panel from the **1950s to the present**, using **Decennial Census** (historical values) and the **American Community Survey (ACS)** for modern data.  
+It aims to build a consistent panel from the **1950s to the present**, combining **Decennial Census** (historical data) and **American Community Survey (ACS)** data for modern years.  
 
 ![County Housing Affordability Map](https://github.com/JonnyMurillo288/Housing-Data/blob/main/HAI_2000_2023_publish_v2.jpg)
+
 ---
 
 ## Core Metrics
 
-### Housing Affordability Index (HAI)  
-
+### Housing Affordability Index (HAI)
 \[
 \text{HAI} = \frac{\text{Median Home Value}}{\text{Median Household Income}}
 \]
 
-### Rent Affordability Index (RAI)  
+### Rent Affordability Index (RAI)
 \[
-\text{RAI} = \frac{\text{Median\ Household\ Income}{Median\ Gross\ Rent}}
+\text{RAI} = \frac{\text{Median Household Income}}{\text{Median Gross Rent}}
 \]
 
 - Uses **median gross rent** (rent + utilities) as reported by Census/ACS.  
@@ -34,7 +36,7 @@ Aiming to build a consistent panel from the **1950s to the present**, using **De
 
 ## Features
 
-Users will be able to view:  
+Users can explore:  
 
 ### Single-Year Snapshots
 - Median household income  
@@ -52,18 +54,18 @@ Users will be able to view:
 
 ## Status
 
-- Scripts implemented for:  
-  - Fetching Census/ACS data (income, home values, rent).  
-  - Incorporating offline decennial tables (1980, 1990).  
-  - Generating panel datasets (CSV & Parquet).
-  - Mapping & GeoJSON integration
-  - Dashboard visualization  
-  - Data validation & cleaning
-  - Adding data beyond year 2000 (Manual HPMS Downloads)
-- **Next steps:**  
-  - Adding data beyond 1980
-  - Adjusting pipeline to allow for custom geographies
-      - State, Block Group, MSA, CBSA, etc.
-  
+**Implemented so far:**
+- ✅ Fetching Census/ACS data (income, home values, rent)  
+- ✅ Incorporating offline decennial tables (1980, 1990)  
+- ✅ Generating panel datasets (CSV & Parquet)  
+- ✅ Mapping & GeoJSON integration  
+- ✅ Dashboard visualization  
+- ✅ Data validation & cleaning  
+- ✅ Adding data beyond year 2000 (manual HPMS downloads)  
+
+**Next Steps:**
+- ⏳ Add data beyond 1980  
+- ⏳ Adjust pipeline for custom geographies (State, Block Group, MSA, CBSA, etc.)  
 
 ---
+
