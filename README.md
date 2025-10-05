@@ -2,7 +2,7 @@
 
 🔗 **Live Dashboard:** [https://us-housing-affordability.streamlit.app/](https://us-housing-affordability.streamlit.app/)
 
-This project is a **work in progress** exploring long-term housing affordability trends at the **U.S. county level**.  
+This project is a **semi-work in progress** exploring long-term housing affordability trends at the **U.S. county level**.  
 It aims to build a consistent panel from the **1950s to the present**, combining **Decennial Census** (historical data) and **American Community Survey (ACS)** data for modern years.  
 
 ![County Housing Affordability Map](https://github.com/JonnyMurillo288/Housing-Data/blob/main/HAI_2000_2023_publish_v2.jpg)
@@ -62,8 +62,8 @@ Users can explore:
 - ✅ Adding data beyond year 2000 (manual HPMS downloads)  
 
 **Next Steps:**
+- ⏳ Add ability to select geographies and get summary statistics from it
 - ⏳ Add data beyond 1980  
 - ⏳ Adjust pipeline for custom geographies (State, Block Group, MSA, CBSA, etc.)  
-
 ---
 
