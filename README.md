@@ -1,6 +1,6 @@
 # Housing & Rent Affordability Project (WIP)
 
-🔗 [Live Dashboard](https://us-housing-affordability.streamlit.app/)
+🔗 **Live Dashboard:** [https://us-housing-affordability.streamlit.app/](https://us-housing-affordability.streamlit.app/)
 
 This project is a **work in progress** exploring long-term housing affordability trends at the **U.S. county level**.  
 It aims to build a consistent panel from the **1950s to the present**, combining **Decennial Census** (historical data) and **American Community Survey (ACS)** data for modern years.  
