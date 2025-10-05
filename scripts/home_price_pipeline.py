@@ -6,7 +6,7 @@ import geopandas as gpd
 from typing import Optional, List
 import json
 
-YEARS = list(range(1990, 2024))  # 1990 Census, 2000 Census, ACS 2005–2023
+YEARS = list(range(1980, 2024))  # 1990 Census, 2000 Census, ACS 2005–2023
 
 API_KEY = "YOUR_CENSUS_API_KEY"
 ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
@@ -138,6 +138,7 @@ if __name__ == "__main__":
     home1980 = load_decennial_1980(
         os.path.join(ROOT, "data_1980.csv")
     )
+    breakpoint()
     home1990 = load_decennial_1990(
         os.path.join(ROOT, "median_home_value_1990.csv")
     )
@@ -147,7 +148,11 @@ if __name__ == "__main__":
 
     # Combine everything
     home_df = pd.concat([home1980, home1990, home_df_api], ignore_index=True)
-
+    home_df = home_df[[
+        "county_fips_full", "state_fips", "county_fips",
+        "median_home_value", "year", "source"
+    ]]
+    home_df = home_df.sort_values(["county_fips_full", "year"]).reset_index(drop=True)
     # Save raw
     raw_csv = PATHS["output_csv"].replace(".csv", "_raw.csv")
     home_df.to_csv(raw_csv, index=False)

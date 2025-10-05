@@ -1,4 +1,13 @@
 {
+    "Columns": [
+        "county_fips_full",
+        "state_fips",
+        "county_fips",
+        "median_home_value",
+        "year",
+        "source",
+        "county_name"
+    ],
     "total_years_processed": 22,
     "total_counties": 3610,
     "years": [

@@ -27,6 +27,7 @@ PATHS = {
 NUMERIC_COLS = [
     "median_household_income",
     "income_change",
+    "median_gross_rent"
     "RAI",
     "HAI"
 ]
@@ -336,8 +337,9 @@ def main():
     gdf_year["median_household_income_fmt"] = gdf_year["median_household_income"].apply(fmt_currency)
     gdf_year["median_gross_rent_fmt"]       = gdf_year["median_gross_rent"].apply(fmt_currency)
     gdf_year["median_home_value_fmt"]       = gdf_year["median_home_value"].apply(fmt_currency)
-    gdf_year['HAI_change_fmt']              = gdf_year['HAI_change'].apply(fmt_ratio)
-    gdf_year['RAI_change_fmt']              = gdf_year['RAI_change'].apply(fmt_ratio)
+    if compare_mode:
+        gdf_year['HAI_change_fmt']              = gdf_year['HAI_change'].apply(fmt_ratio)
+        gdf_year['RAI_change_fmt']              = gdf_year['RAI_change'].apply(fmt_ratio)
 
     # Format compare-mode columns
     if compare_mode:
