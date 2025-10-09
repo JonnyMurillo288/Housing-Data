@@ -4,9 +4,10 @@ import os
 import geopandas as gpd
 from typing import Optional, Tuple, List
 import json
+import sys
 
 
-YEARS = [i for i in range(1991, 2024)]  # ACS 1-year data available from 2009 to 2023
+#YEARS = [i for i in range(1991, 2024)]  # ACS 1-year data available from 2009 to 2023
 
 # If true look through existing housing price data for the years we need to get income for
 FIND_YEARS = True # whether to find years with data
@@ -24,8 +25,84 @@ PATHS = {
     "CENSUS_API_KEY": os.path.join(ROOT,"census_api.txt")
 }
 
+# ------
+# Auto Configure the years and variables
+# ------
+import requests
+import pandas as pd
+
+
 TARGET_CRS = "EPSG:4326"
 
+# ----------------------------
+# Validate CSV path
+# ----------------------------
+def validate_output_path(path: str) -> Tuple[str, str]:
+    if not path.lower().endswith(".csv"):
+        raise ValueError("Output path must end with .csv")
+    base, ext = os.path.splitext(path)
+    return base, ext
+
+
+# ----------------------------
+# Auto dataset + variable selection
+# ----------------------------
+def auto_config(years, variable=None):
+    config = {}
+    for year in years:
+        # Decennial
+        if year == 2000:
+            dataset = "2000/dec/sf3"
+            var = "P060002"  # Median renter HH income (1999$)
+        elif year >= 2009:
+            dataset = f"{year}/acs/acs5"
+            var = variable if variable else "B25119_002E"
+        else:
+            dataset = "saipe"
+            var = "SAEMHI_PT"
+
+        config[year] = {"dataset": dataset, "var": var}
+    return config
+
+# ----------------------------
+# Parse CLI arguments
+# ----------------------------
+def parse_args():
+    if len(sys.argv) < 2:
+        print("Usage: python script.py <output.csv> [start_year] [variable]")
+        print("Example: python script.py output.csv 2010 B25119_002E")
+        # B25119_002E is median HH Income Owner Occupied
+        # B25119_003E is median HH Income Renter Occupied
+        sys.exit(1)
+
+    # --- Output path ---
+    try:
+        base, ext = validate_output_path(sys.argv[1])
+        PATHS["output_csv"] = sys.argv[1]
+        print(f"✅ Output path set to: {PATHS['output_csv']}")
+    except ValueError as ve:
+        print(f"❌ Invalid output path provided: {ve}")
+        sys.exit(1)
+
+    # --- Start year ---
+    if len(sys.argv) > 2:
+        try:
+            start_year = int(sys.argv[2])
+            YEARS = [y for y in range(start_year, 2024) if y >= 1989]
+        except ValueError:
+            print("❌ Invalid start year provided.")
+            sys.exit(1)
+    else:
+        YEARS = [2000, 2010, 2020]
+
+    print(f"📅 Years selected: {YEARS[0]} → {YEARS[-1]}")
+
+    # --- Variable ---
+    variable = sys.argv[3] if len(sys.argv) > 3 else None
+
+    # Build config automatically
+    CONFIG = auto_config(YEARS, variable)
+    return YEARS, CONFIG, PATHS["output_csv"]
 # ------
 # Utility functions
 # ------
@@ -38,121 +115,143 @@ def get_API_KEY() -> Optional[str]:
         return ValueError("Census API key file not found.")
 
 
-# ------
-# Data fetching and processing functions
-# ------
-import requests
-import pandas as pd
 
-# Map decennial census years to the API dataset and variable code
-DECENNIAL_CONFIG = {
-    1970: {"dataset": "1970/sf3", "var": "H043001"},       # placeholder, check NHGIS/codebooks
-    1980: {"dataset": "1980/sf3", "var": "H058A001"},      # placeholder, check NHGIS/codebooks
-    1990: {"dataset": "1990/sf3", "var": "P080A001"},      # Median HH income in 1989 dollars
-    2000: {"dataset": "2000/dec/sf3", "var": "P053001"},   # Median HH income in 1999 dollars
-    2010: {"dataset": "2010/acs/acs5", "var": "B19013_001E"},  # ACS 5-year
-    2020: {"dataset": "2020/acs/acs5", "var": "B19013_001E"},  # ACS 5-year
-}
 
 import requests
 import pandas as pd
 
-# Decennial / ACS5 configs
-DECENNIAL_CONFIG = {
-    2000: {"dataset": "2000/dec/sf3", "var": "P053001"},      # Median HH income (1999$)
-    2010: {"dataset": "2010/acs/acs5", "var": "B19013_001E"}, # ACS 5-year median HH income
-    2020: {"dataset": "2020/acs/acs5", "var": "B19013_001E"}, # ACS 5-year median HH income
-}
+import requests
+import pandas as pd
 
+import requests
+import pandas as pd
 
-# Decennial / ACS5 configs
-DECENNIAL_CONFIG = {
-    2000: {"dataset": "2000/dec/sf3", "var": "P053001"},      # Median HH income (1999$)
-    2010: {"dataset": "2010/acs/acs5", "var": "B19013_001E"}, # ACS 5-year median HH income
-    2020: {"dataset": "2020/acs/acs5", "var": "B19013_001E"}, # ACS 5-year median HH income
-}
-
-def get_county_income(years, api_key: str = None) -> pd.DataFrame:
+def get_county_income(years, config, api_key: str = None) -> pd.DataFrame:
     """
-    Fetch county-level median household income for a list of years.
-      - Decennial years (2000, 2010, 2020): Census/ACS5
-      - Other years (1989+): SAIPE (skips missing years like 1990, 1991, 1992, 1994, 1996)
-
-    Parameters:
-        years (list[int]): Years to fetch
-        api_key (str, optional): Census API key
-
-    Returns:
-        pd.DataFrame: Combined panel of counties × years
+    Fetch county-level data for the given Census configuration.
+    Ensures only one row per (county, year) even if ACS tables return
+    multiple records per county (e.g., B25119_*).
     """
     results = []
 
     for year in years:
-        if year in DECENNIAL_CONFIG:
-            # Use Decennial Census / ACS5
-            cfg = DECENNIAL_CONFIG[year]
-            base_url = f"https://api.census.gov/data/{cfg['dataset']}"
-            params = {"get": f"NAME,{cfg['var']}", "for": "county:*"}
-            if api_key:
-                params["key"] = api_key
+        cfg = config.get(year)
+        if not cfg:
+            print(f"⚠️ No configuration for {year}, skipping.")
+            continue
 
-            resp = requests.get(base_url, params=params)
-            resp.raise_for_status()
-            data = resp.json()
+        dataset = cfg["dataset"]
+        var = cfg["var"]
 
-            df = pd.DataFrame(data[1:], columns=data[0])
-            df[cfg["var"]] = pd.to_numeric(df[cfg["var"]], errors="coerce")
-            df = df.rename(columns={
-                "NAME": "county_name",
-                cfg["var"]: "median_household_income",
-                "state": "state_fips",
-                "county": "county_fips"
-            })
-            df["source"] = cfg["dataset"]
+        try:
+            # Decide between ACS/Decennial and SAIPE
+            if "acs" in dataset or "dec" in dataset:
+                base_url = f"https://api.census.gov/data/{dataset}"
+                params = {
+                    "get": f"NAME,{var}",
+                    "for": "county:*",
+                    "in": "state:*",          # ✅ ensures unique counties
+                }
+                if api_key:
+                    params["key"] = api_key
 
-        else:
-            # Use SAIPE
-            base_url = "https://api.census.gov/data/timeseries/poverty/saipe"
-            params = {"get": "NAME,SAEMHI_PT", "for": "county:*", "time": str(year)}
-            if api_key:
-                params["key"] = api_key
+                resp = requests.get(base_url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
 
-            resp = requests.get(base_url, params=params)
-            if resp.status_code == 204:
-                print(f"⚠️ No SAIPE county data for {year}, skipping.")
-                continue
+                df = pd.DataFrame(data[1:], columns=data[0])
+                df[var] = pd.to_numeric(df[var], errors="coerce")
 
-            resp.raise_for_status()
-            data = resp.json()
+                # Group by county to collapse multiple ACS subcategories
+                df = (
+                    df.groupby(["state", "county", "NAME"], as_index=False)
+                      .agg({var: "median"})  # ✅ only one per county
+                )
 
-            df = pd.DataFrame(data[1:], columns=data[0])
-            df["SAEMHI_PT"] = pd.to_numeric(df["SAEMHI_PT"], errors="coerce")
-            df = df.rename(columns={
-                "NAME": "county_name",
-                "SAEMHI_PT": "median_household_income",
-                "state": "state_fips",
-                "county": "county_fips"
-            })
-            df["source"] = "saipe"
+                df = df.rename(columns={
+                    "NAME": "county_name",
+                    var: "value",
+                    "state": "state_fips",
+                    "county": "county_fips"
+                })
+                df["source"] = dataset
 
-        # Common fields
-        df["county_fips_full"] = df["state_fips"] + df["county_fips"]
-        df["year"] = year
-        results.append(df)
+            else:
+                # ---- SAIPE fallback ----
+                base_url = "https://api.census.gov/data/timeseries/poverty/saipe"
+                params = {
+                    "get": "NAME,SAEMHI_PT",
+                    "for": "county:*",
+                    "in": "state:*",
+                    "time": str(year),
+                }
+                if api_key:
+                    params["key"] = api_key
 
-    return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+                resp = requests.get(base_url, params=params)
+                if resp.status_code == 204:
+                    print(f"⚠️ No SAIPE county data for {year}, skipping.")
+                    continue
 
+                resp.raise_for_status()
+                data = resp.json()
+
+                df = pd.DataFrame(data[1:], columns=data[0])
+                df["SAEMHI_PT"] = pd.to_numeric(df["SAEMHI_PT"], errors="coerce")
+
+                df = df.rename(columns={
+                    "NAME": "county_name",
+                    "SAEMHI_PT": "value",
+                    "state": "state_fips",
+                    "county": "county_fips"
+                })
+                df["source"] = "saipe"
+
+            # ---- Common cleanup ----
+            df = df.dropna(subset=["value"])             # drop blanks
+            df["county_fips_full"] = df["state_fips"].astype(str) + df["county_fips"].astype(str)
+            df["year"] = year
+            results.append(df)
+
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP error for {year}: {e}")
+        except Exception as e:
+            print(f"Error processing {year}: {e}")
+
+    if not results:
+        print("⚠️ No data fetched.")
+        return pd.DataFrame()
+
+    out = pd.concat(results, ignore_index=True)
+
+    # ---- Final guarantee: one row per county per year ----
+    out = (
+        out.sort_values(["year", "county_fips_full", "source"])
+           .drop_duplicates(subset=["county_fips_full", "year"], keep="first")
+    )
+    return out.reset_index(drop=True)
+
+# Find the median income column name based on the variable used
+def _get_median_income_col(df: pd.DataFrame) -> str:
+    # Search through the columns and find the one that has median and income in it
+    cols = df.columns.tolist()
+    for col in cols:
+        if "median" in col.lower() and "income" in col.lower():
+            return col
+    # Fallback to 'value' if no specific column found
+    return "value"
 
 def calculate_year_over_year_change(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate year-over-year change in median household income.
 
     Parameters:
-        df (pd.DataFrame): DataFrame containing 'year', 'county_fips_full', and 'median_household_income'.
+        df (pd.DataFrame): DataFrame containing 'year', 'county_fips_full', and '_get_median_income'.
     """
     
     df = df.sort_values(by=["county_fips_full", "year"])
-    df["income_change"] = df.groupby("county_fips_full")["median_household_income"].pct_change() * 100
+    income_column  = _get_median_income_col(df)
+    df["income_change"] = df.groupby("county_fips_full")[income_column].pct_change() * 100
     df_change = df.dropna(subset=["income_change"])
     
     return df_change
@@ -224,53 +323,49 @@ def get_years_with_hpi_data(input_csv: str) -> List[int]:
 
 # Example usage:
 if __name__ == "__main__":
-    # API_KEY = get_API_KEY()
-    # if FIND_YEARS:
-    #     YEARS = get_years_with_hpi_data(PATHS["hpi_csv"])
+    API_KEY = get_API_KEY()
+    if API_KEY is None:
+        print("No Census API key found; proceeding without it may lead to rate limiting.")
         
-    # raw_income_dfs = []
-    # print('Processing income data for years:', min(YEARS), 'to', max(YEARS))
-    # # for year in YEARS:
-    # income_df = get_county_income(YEARS,API_KEY)  
-    #     # df = df[["county_fips_full", "median_household_income"]]
-    # # raw_income_dfs.append(df)
+    # Parse arguments
+    YEARS, CONFIG, PATHS['output_csv'] = parse_args()
+
+    print("\n✅ Final auto-generated configuration:")
+    for year, cfg in CONFIG.items():
+        print(f"  {year}: dataset={cfg['dataset']}, var={cfg['var']}")
+    
+    print(f"Getting data for years:{YEARS[0]} -> {YEARS[-1]}")
+    print("Config:", CONFIG)
+    print("Output path:", PATHS["output_csv"])
+    
+    income_df = get_county_income(YEARS, CONFIG, API_KEY)
+
+    # Get API key
+        
+    raw_income_dfs = []
+    print('Processing income data for years:', min(YEARS), 'to', max(YEARS))
+    # for year in YEARS:
+        # df = df[["county_fips_full", "median_household_income"]]
+    # raw_income_dfs.append(df)
           
-    # # income_df = pd.concat(raw_income_dfs, ignore_index=True) 
-    # income_df = calculate_year_over_year_change(income_df)
-    # income_df["year"] = income_df["year"].astype(int)
-    # income_df = income_df.sort_values(by=["county_fips_full", "year"])
-    # income_df.to_csv(PATHS["output_csv"].replace(".csv", "_raw.csv"), index=False) #save raw data
+    # income_df = pd.concat(raw_income_dfs, ignore_index=True) 
+    income_df = calculate_year_over_year_change(income_df)
+    income_df["year"] = income_df["year"].astype(int)
+    income_df = income_df.sort_values(by=["county_fips_full", "year"])
+    income_df.to_csv(PATHS["output_csv"].replace(".csv", "_raw.csv"), index=False) #save raw data
     income_df = pd.read_csv(PATHS["output_csv"].replace(".csv", "_raw.csv")) #reload to ensure clean types
-    # Merge with geometries if available
-    county_shape_path = find_shapefile_or_geojson(PATHS["shapefiles_dir"])
-    if county_shape_path:
-        gdf_counties = load_and_clean_geometries(county_shape_path)
-        if gdf_counties is not None:
-            gdf_counties['GEOID'] = gdf_counties['GEOID'].astype(str).str.zfill(5)
-            gdf_counties['GEOID'] = gdf_counties['GEOID'].astype(int)
-            income_df = income_df.merge(gdf_counties, left_on="county_fips_full", right_on="GEOID", how="left")
-            merged_counties = income_df["county_name"].unique().tolist()
-            unmerged_counties = gdf_counties[~gdf_counties["GEOID"].isin(income_df["county_fips_full"])]["NAMELSAD"].unique().tolist()
-            print(f"Merged geometries for {len(merged_counties)} counties.")
-            income_gdf = gpd.GeoDataFrame(income_df, geometry="geometry", crs=TARGET_CRS)
-            save_df(income_df, PATHS["output_csv"].replace(".csv", ".parquet"), PATHS["output_csv"])
-            save_geojson = save_geojson(income_gdf, PATHS["geo_dir"], "income_at_county.geojson")
-        else:
-            print("Failed to load county geometries; saving income data without geometries.")
-            save_df(income_df, PATHS["output_csv"].replace(".csv", ".parquet"), PATHS["output_csv"])
-    else:
-        print("No shapefile/geojson found; saving income data without geometries.")
-        save_df(income_df, PATHS["output_csv"].replace(".csv", ".parquet"), PATHS["output_csv"])
-        
+    save_df(income_df, PATHS["output_csv"].replace(".csv", ".parquet"), PATHS["output_csv"])
+    
+    print(f"✅ Income data saved to: {PATHS['output_csv']}")        
     prof = {
         "total_years_processed": len(YEARS),
         "total_counties": income_df["county_fips_full"].nunique(),
+        "columns": income_df.columns.tolist(),
         "years": YEARS,
-        "merged_counties_number": len(merged_counties) if county_shape_path else 0,
-        "unmerged_counties_number": len(unmerged_counties) if county_shape_path else 0,
-        "counties_merged_with_geometry": merged_counties,
-        "counties_missing_geometry": unmerged_counties
     }
+    for year in YEARS:
+        count = income_df[income_df["year"] == year]["county_fips_full"].nunique()
+        prof[f"counties_with_data_{year}"] = count
     
     prof_path = os.path.join(PATHS["quality_dir"], "income_data_profile.json")
     os.makedirs(PATHS["quality_dir"], exist_ok=True)

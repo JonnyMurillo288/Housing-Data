@@ -2,6 +2,8 @@
 import os
 import json
 from typing import List, Optional, Tuple
+import streamlit.components.v1 as components
+
 
 import pandas as pd
 import geopandas as gpd
@@ -9,6 +11,8 @@ import streamlit as st
 import pydeck as pdk
 from shapely import wkb
 import numpy as np
+import sys
+import matplotlib.colors as mcolors
 
 # -----------------------------
 # Config and paths
@@ -21,13 +25,12 @@ PATHS = {
     "counties_geojson": os.path.join(ROOT, "data", "geo", "counties.parquet"),
     "merged_parquet": os.path.join(ROOT, "data", "processed", "income_rent_at_county.parquet"),
 }
-
+ 
 
 # Expected columns from combine_income_house_price.py
 NUMERIC_COLS = [
     "median_household_income",
-    "income_change",
-    "median_gross_rent"
+    "median_gross_rent",
     "RAI",
     "HAI"
 ]
@@ -41,6 +44,25 @@ ID_COLS = [
 # -----------------------------
 # Utilities
 # -----------------------------
+# This function will adjust the columns and the dtypes to reduce memory usage
+def optimize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """ Reduce memory usage by adjusting column dtypes. """
+    for col in df.select_dtypes(include=["float64"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="float")
+    for col in df.select_dtypes(include=["int64"]).columns:
+        df[col] = pd.to_numeric(df[col], downcast="integer")
+    for col in df.select_dtypes(include=["object"]).columns:
+        num_unique_values = df[col].nunique()
+        num_total_values = len(df[col])
+        if num_unique_values / num_total_values < 0.5:
+            df[col] = df[col].astype("category")
+    return df
+
+def drop_unused_columns(df: pd.DataFrame, cols_to_drop: List[str]) -> pd.DataFrame:
+    """ Drop columns not in required_cols to save memory. """
+    cols_to_drop = [col for col in cols_to_drop if col in df.columns]
+    return df.drop(columns=cols_to_drop)
+
 
 def _load_dataframe() -> "pd.DataFrame":
     """Load DataFrame from Parquet or csv   """
@@ -57,11 +79,17 @@ def _load_dataframe() -> "pd.DataFrame":
             df = pd.read_csv(path, dtype={"county_fips_full": str})
         else:
             raise ValueError(f"Unsupported file format: {path}")
+        unused_cols = ['time','state_fips','county_fips','geoid','name','namelsad',
+                       'geometry','state_fips_left','county_fips_left','state_fips_right',
+                       'county_fips_right','value']
+        
+        df = drop_unused_columns(df, unused_cols)
+        df = optimize_dataframe(df)
         return df
     except Exception as e:
         last_err = e
 
-    if last_err is not None:
+    if last_err:
         st.error(f"Failed to load any dataset. Last error: {last_err}")
     else:
         st.error(
@@ -91,14 +119,14 @@ def _load_geodataframe(path: Optional [os.path.dirname] = None) -> "gpd.GeoDataF
             gdf = gpd.read_file(path)
         else:
             raise ValueError(f"Unsupported file format: {path}")
-        if gdf.crs is None:
+        if gdf.crs == None:
             gdf.set_crs("EPSG:4326", inplace=True)
         elif gdf.crs.to_string() != "EPSG:4326":
             gdf = gdf.to_crs("EPSG:4326")
         return gdf
     except Exception as e:
         last_err = e
-    if last_err is not None:
+    if last_err:
         raise FileNotFoundError("No valid data file found.") from last_err
     else:
         raise FileNotFoundError(
@@ -137,6 +165,11 @@ def calculate_change(df: pd.DataFrame, year1: int, year2: int, value_col: str, c
     ''' 
     df1 = df[df['year'] == year1][['county_fips_full', value_col]].rename(columns={value_col: f'{value_col}_{year1}'})
     df2 = df[df['year'] == year2][['county_fips_full', value_col]].rename(columns={value_col: f'{value_col}_{year2}'})
+#     st.write(
+#     df[df["year"].isin([year1, year2])][
+#         ["year", "county_fips_full", "median_monthly_rent_income"]
+#     ].groupby("year")["median_monthly_rent_income"].describe()
+# )
     df_merged = pd.merge(df1, df2, on='county_fips_full', how='inner')
     df_merged[change_col] = ((df_merged[f'{value_col}_{year2}'] - df_merged[f'{value_col}_{year1}']) / df_merged[f'{value_col}_{year1}']) * 100
     df_merged[change_col] = df_merged[change_col].round(2)
@@ -153,63 +186,188 @@ def calculate_change(df: pd.DataFrame, year1: int, year2: int, value_col: str, c
     return df
 
 
-def _compute_color_scale(series: pd.Series, n_bins: int = 9, diverging: bool = False, reverse: bool = False) -> pd.DataFrame:
-    """Compute RGBA colors for values in a series using a simple color ramp.
-
-    Returns a DataFrame with columns [r, g, b, a] aligned to the input index.
+def _compute_color_scale(series: pd.Series,
+                         compare_mode: bool = False,
+                         diverging: bool = False,
+                         reverse: bool = False) -> tuple[pd.DataFrame, dict]:
     """
-    s = pd.to_numeric(series, errors="coerce")
+    Compute RGBA colors for county-level data.
 
-    # Robust bounds
-    vmin = s.quantile(0.02)
-    vmax = s.quantile(0.98)
-    if pd.isna(vmin) or pd.isna(vmax) or vmin == vmax:
-        vmin = s.min()
-        vmax = s.max()
-    if pd.isna(vmin) or pd.isna(vmax) or vmin == vmax:
-        # Degenerate; single color
-        rgba = pd.DataFrame(
-            {"r": 100, "g": 149, "b": 237, "a": 180},
-            index=s.index,
-        )
-        return rgba
+    - If compare_mode=True: uses fixed bins for percent-change metrics.
+      Emphasizes near-zero changes.
+    - If compare_mode=False: uses quantile-based bins (equal-count).
+    """
+    s = pd.to_numeric(series, errors="coerce").fillna(0)
 
-    # Normalize 0..1
-    t = (s - vmin) / (vmax - vmin)
-    t = t.clip(0, 1).fillna(0.0)
+    # ------------------------------------------------------------
+    # 1. Define bins
+    # ------------------------------------------------------------
+    if compare_mode:
+        # Fixed bins for percent changes (asymmetric)
+        bin_edges = np.array([-np.inf, 0, 10, 20, 40, 60, 80, 100, 150, np.inf])
+    else:
+        # Quantile bins for single-year metrics (9 bins total)
+        try:
+            quantiles = np.linspace(0, 1, 10)
+            bin_edges = s.quantile(quantiles).to_numpy()
+            # Ensure unique edges (avoid duplicate quantile values)
+            bin_edges = np.unique(bin_edges)
+            if len(bin_edges) < 3:
+                bin_edges = np.linspace(s.min(), s.max(), 10)
+        except Exception:
+            # Fallback if series has no variation
+            bin_edges = np.linspace(s.min(), s.max(), 10)
 
-    # 🔄 Reverse for RAI (or if explicitly requested)
+    # ------------------------------------------------------------
+    # 2. Normalize to [0,1] using bin index positions
+    # ------------------------------------------------------------
+    bin_ids = np.digitize(s, bin_edges) - 1
+    t = bin_ids / (len(bin_edges) - 2)
+    t = np.clip(t, 0, 1)
     if reverse:
         t = 1.0 - t
 
-    # Simple sequential ramp (light -> dark blue)
-    def ramp_blue(x: float) -> Tuple[int, int, int]:
-        c0 = (247, 251, 255)  # light
-        c1 = (8, 48, 107)     # dark
-        r = int(c0[0] + (c1[0] - c0[0]) * x)
-        g = int(c0[1] + (c1[1] - c0[1]) * x)
-        b = int(c0[2] + (c1[2] - c0[2]) * x)
-        return r, g, b
+    # ------------------------------------------------------------
+    # 3. Define color ramp (2 blues → white → 6 reds)
+    # ------------------------------------------------------------
+    color_ramp = [
+        (33, 102, 172, 255),
+        (146, 197, 222, 255),
+        (255, 255, 255, 255),
+        (254, 229, 217, 255),
+        (252, 187, 161, 255),
+        (252, 146, 114, 255),
+        (251, 106, 74, 255),
+        (239, 59, 44, 255),
+        (202, 0, 32, 255)
+    ]
+    if reverse:
+        color_ramp = color_ramp[::-1]
 
-    # Diverging ramp (blue-white-red)
-    def ramp_diverging(x: float) -> Tuple[int, int, int]:
-        if x < 0.5:
-            xr = x / 0.5
-            c0 = (49, 130, 189)
-            c1 = (255, 255, 255)
-        else:
-            xr = (x - 0.5) / 0.5
-            c0 = (255, 255, 255)
-            c1 = (202, 0, 32)
-        r = int(c0[0] + (c1[0] - c0[0]) * xr)
-        g = int(c0[1] + (c1[1] - c0[1]) * xr)
-        b = int(c0[2] + (c1[2] - c0[2]) * xr)
-        return r, g, b
+    # ------------------------------------------------------------
+    # 4. Map normalized values to colors
+    # ------------------------------------------------------------
+    def ramp_custom(v):
+        idx = min(int(v * (len(color_ramp) - 1)), len(color_ramp) - 1)
+        return color_ramp[idx]
 
-    rgb = [ramp_diverging(x) if diverging else ramp_blue(x) for x in t]
-    rgba = pd.DataFrame(rgb, index=s.index, columns=["r", "g", "b"])
-    rgba["a"] = 180
-    return rgba
+    rgb = [ramp_custom(v) for v in t]
+    rgba = pd.DataFrame(rgb, index=s.index, columns=["r", "g", "b", "a"])
+
+    return rgba, {"breaks": bin_edges, "colors": color_ramp}
+
+def render_dynamic_legend(series,
+                          diverging=False,
+                          reverse=False,
+                          label=None,
+                          colors_rgba=None,
+                          labels=None):
+    if reverse:
+        colors_rgba = colors_rgba[::-1]
+        labels = labels[::-1]
+
+    hex_colors = [mcolors.to_hex([r/255, g/255, b/255]) for r, g, b, a in colors_rgba]
+    legend_title = label or "Value"
+    st.markdown(
+        f"""
+        <div style="
+            position: relative;
+            margin-top: -420px;  /* overlap pydeck area */
+            margin-left: calc(100% - 260px);
+            width: 240px;
+            background: rgba(255,255,255,0.95);
+            border-radius: 10px;
+            padding: 10px 15px;
+            box-shadow: 0 0 8px rgba(0,0,0,0.3);
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            line-height: 1.2em;
+            color = #222;
+            z-index: 1000;">
+            <b>{legend_title}</b><br><br>
+            {"".join([
+                f"<div style='display:flex;align-items:center;margin-bottom:3px;'>"
+                f"<div style='width:22px;height:12px;background:{color};margin-right:8px;border:1px solid #aaa;'></div>"
+                f"<span>{text}</span></div>"
+                for color, text in zip(hex_colors, labels)
+            ])}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+ 
+    # # ---------------------------------------------------------
+    # # HTML legend: fixed overlay on top of PyDeck chart
+    # # ---------------------------------------------------------
+    # legend_html = f"""
+    # <style>
+    # .custom-legend {{
+    #     position: absolute;
+    #     right: 25px;
+    #     bottom: 30px;
+    #     background: rgba(255,255,255,0.95);
+    #     border-radius: 10px;
+    #     padding: 10px 15px;
+    #     box-shadow: 0 0 8px rgba(0,0,0,0.3);
+    #     font-family: Arial, sans-serif;
+    #     font-size: 13px;
+    #     line-height: 1.2em;
+    #     z-index: 1000;
+    # }}
+    # .legend-row {{
+    #     display: flex;
+    #     align-items: center;
+    #     margin-bottom: 3px;
+    # }}
+    # .legend-color {{
+    #     width: 22px;
+    #     height: 12px;
+    #     margin-right: 8px;
+    #     border: 1px solid #aaa;
+    # }}
+    # </style>
+
+    # <div class="custom-legend">
+    #     <b>{legend_title}</b><br><br>
+    # """
+
+    # for color, text in zip(hex_colors, labels):
+    #     legend_html += f"""
+    #     <div class="legend-row">
+    #         <div class="legend-color" style="background:{color};"></div>
+    #         <span>{text}</span>
+    #     </div>
+    #     """
+
+    # legend_html += "</div>"
+
+    # # Use negative top margin and transparent background so it overlays pydeck
+    # components.html(legend_html, height=0, width=0)
+
+import re
+
+# =====================================
+# Normalize and standardize county names globally
+# =====================================
+def normalize_county_name(name: str) -> str:
+    """Clean and standardize county names for consistent grouping."""
+    if pd.isna(name):
+        return None
+    name = str(name).strip()
+
+    # Remove administrative suffixes
+    name = re.sub(r"\s+(County|Parish|City|Borough|Municipality|Census Area)$", "", name)
+
+    # Remove trailing state names and abbreviations
+    name = re.sub(r",\s*[A-Z][a-z]+$", "", name)   # e.g., ", California"
+    name = re.sub(r",\s*[A-Z]{2}$", "", name)       # e.g., ", CA"
+
+    # Clean any leftover commas or whitespace
+    name = name.strip(" ,")
+
+    return name
+
+
 
 
 def _to_geojson_dict(gdf: "gpd.GeoDataFrame") -> dict:
@@ -245,13 +403,29 @@ def main():
         gdf = gpd.read_parquet(PATHS["counties_geojson"])[["GEOID", "geometry"]].rename(columns={"GEOID": "county_fips_full"})
         gdf['county_fips_full'] = gdf['county_fips_full'].astype(df['county_fips_full'].dtype)
 
-        if gdf.crs is None:
+        if gdf.crs == None:
             gdf.set_crs("EPSG:4326", inplace=True)
         elif gdf.crs.to_string() != "EPSG:4326":
-            gdf = gdf.to_crs("EPSG:4326")
+            gdf = gdf.to_crs("EPSG:4326") 
 
     years = sorted(df["year"].dropna().unique()) if "year" in df.columns else []
     value_cols = _detect_value_columns(df)
+    df['median_monthly_rent_income'] = df['median_household_income'] / 12
+    # Apply cleaning
+    df["county_name_base"] = df["county_name"].apply(normalize_county_name)
+
+    # Find the longest full name for each base name group
+    longest_names = (
+        df.groupby("county_fips_full")["county_name"]
+        .apply(lambda x: max(x, key=len))
+        .to_dict()
+    )
+
+    # Replace every name with its longest version
+    df["county_name_clean"] = df["county_fips_full"].map(longest_names)
+
+    # Drop helper column
+    df.drop(columns=["county_name_base"], inplace=True)
 
     # -----------------------------
     # Sidebar Controls
@@ -279,11 +453,12 @@ def main():
         df_year = df[(df["year"] == year1) | (df["year"] == year2)].copy()
         df_year = calculate_change(df_year, year1, year2, sel_metric, f"{sel_metric}_change")
         df_year = calculate_change(df_year, year1, year2, "median_household_income", f"median_household_income_change")
+        df_year = calculate_change(df_year, year1, year2, "median_gross_rent", f"median_gross_rent_change")
         df_year = calculate_change(df_year, year1, year2, "median_home_value", f"median_home_value_change")
         df_year = calculate_change(df_year, year1, year2, "median_gross_rent", f"median_gross_rent_price_change")
+        df_year = calculate_change(df_year, year1, year2, "median_monthly_rent_income", f"median_monthly_rent_income_change")
         df_year = calculate_change(df_year, year1, year2, "HAI", f"HAI_change")
-        df_year = calculate_change(df_year, year1, year2, "RAI", f"RAI_change")
-        
+        df_year = calculate_change(df_year, year1, year2, "RAI", f"RAI_change") 
         
         desc = ""
         if sel_metric == "HAI":
@@ -301,6 +476,10 @@ def main():
         return
 
     metric_col = f"{sel_metric}_change" if compare_mode and sel_metric else sel_metric
+    if "change" in sel_metric:
+        pct_change = True
+    else:
+        pct_change = False
     if metric_col and metric_col in df_year.columns:
         s = pd.to_numeric(df_year[metric_col], errors="coerce")
         diverging = (s.min(skipna=True) < 0) and (s.max(skipna=True) > 0)
@@ -308,7 +487,7 @@ def main():
             reverse = True
         else:
             reverse = False
-        rgba = _compute_color_scale(s, diverging=diverging,reverse=reverse)
+        rgba, color_meta = _compute_color_scale(s, pct_change, diverging=diverging, reverse=reverse)
         for ch in ["r", "g", "b", "a"]:
             df_year[f"_c_{ch}"] = rgba[ch].values
         df_year["_fill_color"] = df_year.apply(lambda r: [int(r["_c_r"]), int(r["_c_g"]), int(r["_c_b"]), int(r["_c_a"])], axis=1)
@@ -316,7 +495,7 @@ def main():
         df_year["_fill_color"] = [[100, 149, 237, 180]] * len(df_year)
 
     gdf_year = gdf.merge(df_year, on="county_fips_full", how="left")
-    gdf_year = gdf_year[~gdf_year.geometry.isna()].copy()
+    gdf_year = gdf_year[~gdf_year.geometry.isna() & gdf_year[sel_metric].notna()].copy()
     if gdf_year.empty:
         st.warning("No geometries found after merging with county shapes.")
         return
@@ -335,17 +514,26 @@ def main():
     
     # ---- FORMAT ALL NUMERIC COLUMNS ----
     gdf_year["median_household_income_fmt"] = gdf_year["median_household_income"].apply(fmt_currency)
+    gdf_year['median_monthly_rent_income_fmt'] = gdf_year['median_monthly_rent_income'].apply(fmt_currency)
     gdf_year["median_gross_rent_fmt"]       = gdf_year["median_gross_rent"].apply(fmt_currency)
     gdf_year["median_home_value_fmt"]       = gdf_year["median_home_value"].apply(fmt_currency)
+
+    gdf_year['HAI_fmt'] = gdf_year['HAI'].apply(fmt_ratio)
+    gdf_year['RAI_fmt'] = gdf_year['RAI'].apply(fmt_ratio)
     if compare_mode:
         gdf_year['HAI_change_fmt']              = gdf_year['HAI_change'].apply(fmt_ratio)
         gdf_year['RAI_change_fmt']              = gdf_year['RAI_change'].apply(fmt_ratio)
+        gdf_year["median_gross_rent_change_fmt"]       = gdf_year["median_gross_rent_change"].apply(fmt_currency)
+        gdf_year["median_home_value_change_fmt"]       = gdf_year["median_home_value_change"].apply(fmt_currency)
+
 
     # Format compare-mode columns
     if compare_mode:
         for y in [year1, year2]:
             if f"median_household_income_{y}" in gdf_year:
                 gdf_year[f"median_household_income_{y}_fmt"] = gdf_year[f"median_household_income_{y}"].apply(fmt_currency)
+            if f"median_monthly_rent_income_{y}" in gdf_year:
+                gdf_year[f"median_monthly_rent_income_{y}_fmt"] = gdf_year[f"median_monthly_rent_income_{y}"].apply(fmt_currency)
             if f"median_home_value_{y}" in gdf_year:
                 gdf_year[f"median_home_value_{y}_fmt"] = gdf_year[f"median_home_value_{y}"].apply(fmt_currency)
             if f"median_gross_rent_{y}" in gdf_year:
@@ -356,7 +544,7 @@ def main():
                 gdf_year[f"RAI_{y}_fmt"] = gdf_year[f"RAI_{y}"].apply(fmt_ratio)
 
     gj = _to_geojson_dict(gdf_year)    # st.json(gj["features"][0]["properties"])
-    
+    st.caption(f"GeoJSON size: {sys.getsizeof(json.dumps(gj)) / 1024**2:.1f} MB")
     # -----------------------------
     # Map View
     # -----------------------------
@@ -398,7 +586,7 @@ def main():
             tooltip = {
                 "html": (
                     "<b>{county_name} County</b><br/>"
-                    f"HAI: {{metric_value_fmt}}<br/>"
+                    f"HAI: {{HAI_fmt}}<br/>"
                     "Median Income: {median_household_income_fmt}<br/>"
                     "Median Home Value: {median_home_value_fmt}"
                 ),
@@ -409,8 +597,8 @@ def main():
             tooltip = {
                 "html": (
                     "<b>{county_name} County</b><br/>"
-                    f"RAI: {{metric_value_fmt}}<br/>"
-                    "Median Income: {median_household_income_fmt}<br/>"
+                    f"RAI: {{RAI_fmt}}<br/>"
+                    "Median Income: {median_monthly_rent_income_fmt}<br/>"
                     "Median Rent: {median_gross_rent_fmt}"
                 ),
                 "style": {"backgroundColor": "steelblue", "color": "white"}
@@ -420,7 +608,7 @@ def main():
             tooltip = {
                 "html": (
                     "<b>{county_name} County</b><br/>"
-                    f"{sel_metric}: {{metric_value_fmt}}<br/>"
+                    "{median_household_income_fmt}: {{RAI_fmt}}<br/>"
                     "Median Income: {median_household_income_fmt}"
                 ),
                 "style": {"backgroundColor": "steelblue", "color": "white"}
@@ -450,8 +638,8 @@ def main():
                     f"RAI Change: {{RAI_change_fmt}}%<br/>"
                     f"Year 1 ({year1}) RAI: {{RAI_{year1}_fmt}}<br/>"
                     f"Year 2 ({year2}) RAI: {{RAI_{year2}_fmt}}<br/>"
-                    f"Median Income {year1}: {{median_household_income_{year1}_fmt}}<br/>"
-                    f"Median Income {year2}: {{median_household_income_{year2}_fmt}}<br/>"
+                    f"Median Income {year1}: {{median_monthly_rent_income_{year1}_fmt}}<br/>"
+                    f"Median Income {year2}: {{median_monthly_rent_income_{year2}_fmt}}<br/>"
                     f"Median Rent {year1}: {{median_gross_rent_{year1}_fmt}}<br/>"
                     f"Median Rent {year2}: {{median_gross_rent_{year2}_fmt}}"
                 ),
@@ -483,36 +671,156 @@ def main():
 
     st.subheader("County Map")
     st.write("Hover over a county for details.")
-    if sel_metric is "HAI":
+    if sel_metric == "HAI":
         "HAI (Housing Affordability Index) is the ratio of the median home price divided by the median household income. A HAI of 3 means that the price of the median house in a county is 3x the median household income."
-    elif sel_metric is "RAI":
+    elif sel_metric == "RAI":
         "RAI (Rent Affordability Index) is the ratio of Monthly median household income to the monthly median rent. A RAI of 3 means that a family with median income makes three times as much as the median monthly rent price."
     st.pydeck_chart(r, use_container_width=True)
+    
+    # ====================================================
+    # --- LEGEND USING SAME COLOR RAMP AS MAP ---
+    # ====================================================
+    # color_meta was returned by _compute_color_scale()
+    breaks = color_meta["breaks"]
+    colors_rgba = color_meta["colors"]
+
+    # Build readable labels aligned with the fixed breaks
+    labels = []
+    for i in range(len(breaks) - 1):
+        low, high = breaks[i], breaks[i + 1]
+        if i == 0:
+            labels.append(f"≤ {high}")
+        elif i == len(breaks) - 2:
+            labels.append(f"≥ {low}")
+        else:
+            labels.append(f"{low} – {high}")
+
+    # Reverse ramp for RAI or reverse scale
+    if reverse:
+        colors_rgba = colors_rgba[::-1]
+        labels = labels[::-1]
+
+    # Render the legend (HTML component)
+    render_dynamic_legend(
+        df_year[metric_col],
+        diverging=diverging,
+        reverse=reverse,
+        label=f"{sel_metric} Change (%)" if compare_mode else sel_metric,
+        colors_rgba=colors_rgba,
+        labels=labels
+    )
+    
+    # =============================
+    # County time series line chart
+    # =============================
+    st.subheader("County time series")
+
+    plot_metric = sel_metric
+
+    # ---------------------------------------------
+    # Create a unique, display-friendly county name
+    # ---------------------------------------------
+    if "state_name" in df.columns:
+        df["county_name_display"] = df["county_name_clean"] + ", " + df["state_name"]
+    else:
+        # fallback if state_name column not available: use original county_name
+        df["county_name_display"] = df["county_name_clean"]
+
+    county_options = (
+        df[["county_fips_full", "county_name_display"]]
+        .drop_duplicates()
+        .sort_values("county_name_display")
+    )
+    name_to_fips = dict(zip(county_options["county_name_display"], county_options["county_fips_full"]))
+
+    # Default to SF if available
+    default_selection = (
+        ["San Francisco County, California"]
+        if "San Francisco County, California" in county_options["county_name_display"].tolist()
+        else []
+    )
+
+    selected_county_names = st.multiselect(
+        "Select counties to compare",
+        options=county_options["county_name_display"].tolist(),
+        default=default_selection,
+        help=f"Shows {plot_metric} by year for the selected counties."
+    )
+
+    if not selected_county_names:
+        st.info("Select one or more counties above to see a time series chart.")
+    else:
+        selected_fips = [name_to_fips[n] for n in selected_county_names if n in name_to_fips]
+
+        # -----------------------------
+        # Build tidy dataframe for selected counties
+        # -----------------------------
+        plot_df = (
+            df[df["county_fips_full"].isin(selected_fips)]
+            .loc[:, ["year", "county_name_display", plot_metric]]
+            .dropna(subset=["year", "county_name_display", plot_metric])
+        )
+        all_years = pd.Index(range(1995, 2024), name="year")
+        # Merge duplicates (same county/year) — take max
+        plot_df = (
+            plot_df.groupby(["year", "county_name_display"], as_index=False)[plot_metric]
+            .max(numeric_only=True)
+        )
+
+        if plot_df.empty:
+            st.warning(f"No data available for {plot_metric} across years for the selected counties.")
+        else:
+
+            import altair as alt
+            y_title = plot_metric.replace("_", " ").title()
+
+            year_ticks = list(range(1995, 2025, 5))  # ticks every 5 years
+
+            chart = (
+                alt.Chart(plot_df)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X(
+                        "year:O",
+                        title="Year",
+                        sort=sorted(plot_df["year"].unique().tolist()),
+                        axis=alt.Axis(
+                            values=year_ticks,
+                            labelAngle=0,      # keeps year labels horizontal
+                            tickMinStep=1,     # ensures even tick spacing
+                        ),
+                    ),
+                    y=alt.Y(f"{plot_metric}:Q", title=y_title),
+                    color=alt.Color(
+                        "county_name_display:N",
+                        title="County",
+                        scale=alt.Scale(domain=selected_county_names),
+                        legend=alt.Legend(title="County"),
+                    ),
+                    tooltip=[
+                        alt.Tooltip("county_name_display:N", title="County"),
+                        alt.Tooltip("year:O", title="Year"),
+                        alt.Tooltip(f"{plot_metric}:Q", title=y_title, format=",.2f"),
+                    ],
+                )
+                .properties(height=360)
+            )
+            st.altair_chart(chart, use_container_width=True)
+
+
 
     # -----------------------------
     # Data Table
     # -----------------------------
     with st.expander("Show data for selected year(s)"):
         cols_to_show = [c for c in ID_COLS if c in gdf_year.columns]
-        other_cols = [c for c in gdf_year.columns if c not in cols_to_show + ["geometry"] and not c.startswith("_c_") and c != "_fill_color"]
+        other_cols = [
+            c for c in gdf_year.columns
+            if c not in cols_to_show + ["geometry"]
+            and not c.startswith("_c_")
+            and c != "_fill_color"
+        ]
         st.dataframe(gdf_year[cols_to_show + other_cols].reset_index(drop=True))
-
-    # Create a button for users to download the data as either csv or geojson
-    with st.expander("Download data"):
-        csv = gdf_year[cols_to_show + other_cols].to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download data as CSV",
-            data=csv,
-            file_name='county_income_hpi_data.csv',
-            mime='text/csv',
-        )
-        geojson_str = json.dumps(gj)
-        st.download_button(
-            label="Download data as GeoJSON",
-            data=geojson_str,
-            file_name='county_income_hpi_data.geojson',
-            mime='application/geo+json',
-        )
 
 if __name__ == "__main__":
     # Allow running via `streamlit run scripts/build_interactive_map.py`

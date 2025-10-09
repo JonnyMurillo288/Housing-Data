@@ -136,12 +136,36 @@ expand_bbox <- function(bb, factor = 0.1) {
 }
 
 bb_zoom <- expand_bbox(st_bbox(map_conus), factor = 0.1)
+min_val <- -9
+max_val <- 201
+n_bins <- 9
+breaks <- seq(min_val, max_val, length.out = n_bins + 1)
+breaks_custom =c(-9, 0, 25, 50, 75, 100, 125, 150, 175, 201)
+breaks_custom2 <- c(-10, 0, 10, 25, 50, 75, 100, 150, 200)
 
+pal_custom <- c(
+  "#2166ac",  # dark blue (strong improvement)
+  "#92c5de",  # light blue (mild improvement)
+  "#f7f7f7",  # neutral / no change
+  "#fddbc7",  # slight worsening
+  "#f4a582",  # mild worsening
+  "#d6604d",  # moderate
+  "#b2182b",  # severe
+  "#8b0000",  # very severe (optional deeper red)
+  "#67001f"   # extreme (optional)
+)
+labels_custom <- c(
+  "150–200%", "100–149%", "75–99%", "50–74%",
+  "25–49%", "10–24%", "0–9%", "-10–0%"
+)
 
+# your fixed breaks
+breaks_custom <- c(-10, 0, 10, 25, 50, 75, 100, 150, 200)
 # 9) Plot with tmap
 map <- tm_shape(map_conus, bbox = st_bbox(map_conus)) +
-  tm_polygons("HAI_change", style = "fixed", breaks = qts,
-              palette = "BuRd", midpoint = 34, title = "HAI Change (%)") +
+  tm_polygons("HAI_change", style = "fixed", breaks = breaks_custom,
+              palette = pal_custom, title = "HAI Change (%)",
+              labels = rev(labels_custom)) +
   tm_borders(lwd = 0.1, col = "grey") +
   #tm_shape(lines_sf) + tm_lines(col = "black", lwd = 0.7) +
   #tm_shape(label_sf %>% filter(side == "left")) +
@@ -149,20 +173,43 @@ map <- tm_shape(map_conus, bbox = st_bbox(map_conus)) +
   #tm_shape(label_sf %>% filter(side == "right")) +
   #tm_text("label_txt", size = 0.7, just = "left") +
   tm_layout(
-    frame = TRUE,
-    #legend.position = c("right","bottom"),
+    frame = FALSE,
     legend.outside = TRUE,
-    asp = 0,
-    outer.margins = c(0,0,0,0),
+    legend.reverse = TRUE,
+    legend.title.size = 1.0,
+    legend.text.size = 0.8,
+    outer.margins = c(0, 0, 0, 0),
     inner.margins = c(0.02, 0.25, 0.02, 0.02),
-    title = "Top 5 + Major Metro Counties - HAI Change %",
     title.size = 1.2
   )
 
 map
-legend <- tm_shape(map_conus, bbox = st_bbox(map_conus)) +
-  tm_polygons("HAI_change", style = "fixed", breaks = qts,
-              palette = "RdBu", midpoint = 34, title = "HAI Change (%)") +
+map <- tm_shape(map_conus[map_conus$HAI_change>-50,], bbox = st_bbox(map_conus)) +
+tm_polygons(
+  "HAI_log",
+  style = "cont",
+  palette = "BuRd",    # or "RdYlBu", "-PuOr", "RdGy"
+  midpoint = 0,
+  title = "HAI Change (%)"
+)+
+tm_borders(lwd = 0.1, col = "grey") +
+  tm_layout(
+    frame = FALSE,
+    legend.outside = TRUE,
+    legend.reverse = TRUE,        # <── this reverses legend order
+    legend.title.size = 1.0,
+    legend.text.size = 0.8,
+    legend.format = list(digits = 0, text.separator = "–", suffix = "%"),
+    outer.margins = c(0, 0, 0, 0),
+    inner.margins = c(0.02, 0.25, 0.02, 0.02),
+    title = "Change in Housing Affordability Index (2000–2023)",
+    title.size = 1.2
+  )
+  
+map
+legend <- tm_shape(map_conus[map_conus$HAI_change>-50,], bbox = st_bbox(map_conus)) +
+  tm_polygons("HAI_change", style = "fixed", breaks = breaks_custom,
+              palette = pal_custom, title = "HAI Change (%)") +
   tm_borders(lwd = 0.1, col = "grey") +
   #tm_shape(lines_sf) + tm_lines(col = "black", lwd = 0.7) +
   #tm_shape(label_sf %>% filter(side == "left")) +
@@ -181,6 +228,7 @@ legend <- tm_shape(map_conus, bbox = st_bbox(map_conus)) +
     title.size = 1.2
   )
 
+legend
 bb_super_zoom <- expand_bbox(st_bbox(map_conus), factor = 0.2)
 
 tm_shape(label_sf, bbox = st_bbox(label_sf)) + 
