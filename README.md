@@ -5,7 +5,7 @@
 This project is a **semi-work in progress** exploring long-term housing affordability trends at the **U.S. county level**.  
 It aims to build a consistent panel from the **1950s to the present**, combining **Decennial Census** (historical data) and **American Community Survey (ACS)** data for modern years.  
 
-![County Housing Affordability Map](https://github.com/JonnyMurillo288/Housing-Data/blob/main/HAI_2000_2023_publish_v3_desc_stats.jpg)
+![County Housing Affordability Map](https://github.com/JonnyMurillo288/Housing-Data/blob/main/HAI_2000_2023_publish_v3_new_color.jpg)
 
 ---
 
