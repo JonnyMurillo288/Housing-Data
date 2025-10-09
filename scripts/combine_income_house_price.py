@@ -1,36 +1,53 @@
-import requests
-import pandas as pd
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import os
-import geopandas as gpd
-from typing import Optional, Tuple, List
-import json
 import re
+import json
+import time
+import pandas as pd
+import geopandas as gpd
+from typing import Optional, List, Dict
 
 
-ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+# ===============================
+# CONFIG
+# ===============================
+
+def _safe_root() -> str:
+    try:
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    except NameError:
+        return os.getcwd()
+
+ROOT = _safe_root()
+
 PATHS = {
-    "shapefiles_dir": os.path.join(ROOT, "shapefiles"),
-    "hpi_geojson": os.path.join(ROOT, "data", "geo", "hpi_at_county.geojson"),
-    "hpi_long_parquet": os.path.join(ROOT, "data", "processed", "county_timeseries_long.parquet"),
-    "processed_dir": os.path.join(ROOT, "data", "processed"),
     "geo_dir": os.path.join(ROOT, "data", "geo"),
+    "processed_dir": os.path.join(ROOT, "data", "processed"),
     "quality_dir": os.path.join(ROOT, "data", "quality"),
     "fig_maps_dir": os.path.join(ROOT, "figures", "maps"),
-    "CENSUS_API_KEY": os.path.join(ROOT,"census_api.txt"),
     "home_value_data": os.path.join(ROOT, "data", "processed", "home_value_at_county.parquet"),
     "rent_data": os.path.join(ROOT, "data", "processed", "rent_at_county.parquet"),
-    "merged_parquet": os.path.join(ROOT, "data", "processed", "income_hpi_at_county.parquet"),
-    "new_merged_parquet": os.path.join(ROOT, "data", "processed", "income_hpi_home_rent_at_county.parquet"),
+    "median_income_csv": os.path.join(ROOT, "data", "processed", "income_at_county.csv"),
+    "median_renters_income_csv": os.path.join(ROOT, "data", "processed", "renters_income.csv"),
+    "output_merged_parquet": os.path.join(ROOT, "data", "processed", "income_hpi_home_rent_at_county.parquet"),
+    "profile_json": os.path.join(ROOT, "data", "quality", "home_and_rent_and_income_merge.json"),
 }
 
 TARGET_CRS = "EPSG:4326"
-# ------
-# Utility functions
-# ------
-def ensure_dirs():
-    for p in [PATHS["processed_dir"], PATHS["geo_dir"], PATHS["quality_dir"], PATHS["fig_maps_dir"]]:
-        os.makedirs(p, exist_ok=True)
 
+
+# ===============================
+# UTILITY FUNCTIONS
+# ===============================
+
+def ensure_dirs():
+    for key in ["processed_dir", "geo_dir", "quality_dir", "fig_maps_dir"]:
+        os.makedirs(PATHS[key], exist_ok=True)
+
+def print_step(msg: str):
+    print(f"▶ {msg}")
 
 def snake_case(s: str) -> str:
     s = re.sub(r"[\s\-/]+", "_", s.strip())
@@ -38,220 +55,156 @@ def snake_case(s: str) -> str:
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
     return s.lower()
 
-
 def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [snake_case(c) for c in df.columns]
     return df
 
 
-# ------
-# Reading Data functions
-# ------
+# ===============================
+# DATA LOADING
+# ===============================
 
-def get_income_geojson(fallback_geojson: Optional[str] = None):
-    """Function for getting the income geojson file, with optional fallback."""
-    income_geojson_path = os.path.join(PATHS["geo_dir"], "income_at_county.geojson")
-    if os.path.isfile(income_geojson_path):
-        gdf = gpd.read_file(income_geojson_path)
+def load_parquet(path: str, expected_cols: Optional[List[str]] = None) -> pd.DataFrame:
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Missing parquet file: {path}")
+    df = pd.read_parquet(path)
+    df = standardize_columns(df)
+    if expected_cols:
+        df = df[[c for c in expected_cols if c in df.columns]]
+    return df
+
+def load_csv(path: str) -> pd.DataFrame:
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Missing CSV file: {path}")
+    df = pd.read_csv(path)
+    df = standardize_columns(df)
+    return df
+
+def load_geojson(path: str, first_rows: Optional[int] = None) -> gpd.GeoDataFrame:
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Missing GeoJSON: {path}")
+    gdf = gpd.read_file(path, rows=first_rows) if first_rows else gpd.read_file(path)
+    if gdf.crs is None or gdf.crs.to_string() != TARGET_CRS:
         gdf = gdf.to_crs(TARGET_CRS)
-    elif fallback_geojson and os.path.isfile(fallback_geojson):
-        gdf = gpd.read_file(fallback_geojson)
-        gdf = gdf.to_crs(TARGET_CRS)
-    else:
-        raise FileNotFoundError("Income GeoJSON file not found.")
-    
     return gdf
-    
-    
-def get_hpi_geojson(fallback_geojson: Optional[str] = None, first_rows: Optional[int]= None):
-    """Function for getting the HPI geojson file, with optional fallback."""
-    hpi_geojson_path = os.path.join(PATHS["geo_dir"], "hpi_at_county.geojson")
-    if os.path.isfile(hpi_geojson_path):
-        if first_rows is not None:
-            gdf = gpd.read_file(hpi_geojson_path, rows=first_rows)
-            gdf = gdf.to_crs(TARGET_CRS)
-        else: 
-            gdf = gpd.read_file(hpi_geojson_path)
-            gdf = gdf.to_crs(TARGET_CRS)
-    elif fallback_geojson and os.path.isfile(fallback_geojson):
-        if first_rows is not None:
-            gdf = gpd.read_file(fallback_geojson, rows=first_rows)
-            gdf = gdf.to_crs(TARGET_CRS)
-        else: 
-            gdf = gpd.read_file(fallback_geojson)
-            gdf = gdf.to_crs(TARGET_CRS)
-    else:
-        raise FileNotFoundError("HPI GeoJSON file not found.")
-    
-    return gdf
+
+
+# ===============================
+# CLEANING HELPERS
+# ===============================
+
+def coerce_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure expected numeric/string types exist."""
+    if "year" in df.columns:
+        df["year"] = pd.to_numeric(df["year"], errors="coerce")
+    if "county_fips_full" in df.columns:
+        df["county_fips_full"] = df["county_fips_full"].astype(str).str.zfill(5)
+    return df
+
+def merge_datasets(df1: pd.DataFrame, df2: pd.DataFrame, on: List[str]) -> pd.DataFrame:
+    """Safe merge with dtype alignment."""
+    for c in on:
+        if df1[c].dtype != df2[c].dtype:
+            df2[c] = df2[c].astype(df1[c].dtype)
+    merged = df1.merge(df2, on=on, how="left", suffixes=("_left", "_right"))
+    return merged
+
+
+# ===============================
+# DOMAIN-SPECIFIC LOADERS
+# ===============================
 
 def get_home_value_data() -> pd.DataFrame:
-    """Function for getting the home value parquet file."""
-    home_value_path = PATHS["home_value_data"]
-    if os.path.isfile(home_value_path):
-        df = pd.read_parquet(home_value_path)
-        df = standardize_columns(df)
-        df["median_home_value"] = pd.to_numeric(df["median_home_value"], errors="coerce")
-        df["year"] = pd.to_numeric(df["year"], errors="coerce")
-        df["county_fips_full"] = df["county_fips_full"].str.zfill(5)
-    else:
-        raise FileNotFoundError("Home Value CSV file not found.")
-    
+    df = load_parquet(PATHS["home_value_data"])
+    df = coerce_columns(df)
+    df = df.drop_duplicates(subset=["county_fips_full", "year"])
+
+    df["median_home_value"] = pd.to_numeric(df.get("median_home_value"), errors="coerce")
     return df
 
 def get_rent_data() -> pd.DataFrame:
-    """Function for getting the rent PARQUET file."""
-    rent_data_path = PATHS["rent_data"]
-    if os.path.isfile(rent_data_path):
-        df = pd.read_parquet(rent_data_path)
-        df = standardize_columns(df)
-        df["median_gross_rent"] = pd.to_numeric(df["median_gross_rent"], errors="coerce")
-        df["year"] = pd.to_numeric(df["year"], errors="coerce")
-        df["county_fips_full"] = df["county_fips_full"].str.zfill(5)
-    else:
-        raise FileNotFoundError("Rent CSV file not found.")
-    
+    df = load_parquet(PATHS["rent_data"])
+    df = coerce_columns(df)
+    # Drop duplicate rows if 'county_fips_full' and 'year' are the same
+    df = df.drop_duplicates(subset=["county_fips_full", "year"])
+    df["median_gross_rent"] = pd.to_numeric(df.get("median_gross_rent"), errors="coerce")
     return df
 
-# ------
-# Data checks functions
-# ------
+def get_income_data() -> pd.DataFrame:
+    income = load_csv(PATHS["median_income_csv"])
+    income = income.drop_duplicates(subset=["county_fips_full", "year"])
+    renters = load_csv(PATHS["median_renters_income_csv"])
 
-def change_dtype(df: pd.DataFrame, col: str, dtype) -> pd.DataFrame:
-    """Change the data type of a specified column in a DataFrame."""
-    df = df.copy()
-    if col in df.columns:
-        df[col] = df[col].astype(dtype)
-    else:
-        raise KeyError(f"Column '{col}' not found in DataFrame.")
-    return df
-
-def check_merge_columns(gdf1: gpd.GeoDataFrame, gdf2: gpd.GeoDataFrame, on: List[str]) -> bool:
-    """Check if two GeoDataFrames can be merged on specified columns."""
-    for col in on:
-        if col not in gdf1.columns or col not in gdf2.columns:
-            return False
-        if gdf1[col].dtype != gdf2[col].dtype:
-            raise ValueError(f"Column '{col}' has different data types: {gdf1[col].dtype} vs {gdf2[col].dtype}")
-    return True
-
-def check_CRS(gdf1: gpd.GeoDataFrame, gdf2: gpd.GeoDataFrame) -> bool:
-    """Check if two GeoDataFrames have the same CRS."""
-    return gdf1.crs == gdf2.crs
+    renters = renters.drop_duplicates(subset=["county_fips_full"])
+    renters = renters.rename(columns={"value": "median_renters_income"})
+    # Where the year is 2000 multiply by 12 to get annual income
+    renters.loc[renters["year"] == 2000, "median_renters_income"] *= 12
+    merged = income.merge(
+        renters[["county_fips_full", "median_renters_income"]],
+        on="county_fips_full",
+        how="left"
+    )
+    return coerce_columns(merged)
 
 
-import time
+# ===============================
+# MERGING LOGIC
+# ===============================
+
+def merge_home_rent_income() -> pd.DataFrame:
+    print_step("Loading income, home value, and rent data...")
+    income_df = get_income_data()
+    home_df = get_home_value_data()
+    rent_df = get_rent_data()
+
+    print_step("Merging home and rent data...")
+    home_rent = merge_datasets(home_df, rent_df, ["county_fips_full", "year"])
+    print_step("Merging income with home/rent data...")
+    merged = merge_datasets(income_df, home_rent, ["county_fips_full", "year"])
+    print_step(f"✅ Final merged shape: {merged.shape}")
+    return merged
+
+
+# ===============================
+# QUALITY / PROFILING
+# ===============================
+
+def profile_dataframe(df: pd.DataFrame) -> Dict:
+    profile = {
+        "merged_counties_number": df["county_fips_full"].nunique() if "county_fips_full" in df.columns else None,
+        "years_covered": df["year"].nunique() if "year" in df.columns else None,
+        "total_records": len(df),
+        "columns": df.columns.tolist(),
+        "number_of_counties_by_year": df.groupby("year")["county_fips_full"].nunique().to_dict() if {"year", "county_fips_full"}.issubset(df.columns) else None,
+        "missing_values_summary": df.isnull().sum().to_dict(),
+        "data_types": df.dtypes.apply(lambda x: x.name).to_dict(),
+    }
+    return profile
+
+
+# ===============================
+# MAIN
+# ===============================
+
+def main():
+    ensure_dirs()
+    t0 = time.time()
+
+    merged = merge_home_rent_income()
+
+    print_step("Saving merged dataset...")
+    merged.to_parquet(PATHS["output_merged_parquet"], index=False)
+
+    print_step("Building profile JSON...")
+    profile = profile_dataframe(merged)
+    with open(PATHS["profile_json"], "w") as f:
+        json.dump(profile, f, indent=4)
+
+    print_step(f"✅ Done in {time.time() - t0:.2f} seconds")
+    print_step(f"Output written to: {PATHS['output_merged_parquet']}")
+    print_step(f"Profile saved to: {PATHS['profile_json']}")
+
 
 if __name__ == "__main__":
-    ensure_dirs()
-    t = time.time()
-    
-    income_gdf = get_income_geojson()
-    print("Got income GeoDataFrame with columns:", income_gdf.columns.tolist())
-    
-    # hpi_gdf = get_hpi_geojson(first_rows=5)
-    # print("got HPI GeoDataFrame with columns:", hpi_gdf.columns.tolist())
-    # Updated Data Types
-    # hpi_gdf = change_dtype(hpi_gdf, "county_fips_full", income_gdf.county_fips_full.dtype)
-    
-    # Read in the parquest file for HPI
-    # This file does not have geometry so we will merge without geometry and then add geometry later
-    # This is because the parquet file is much smaller and faster to read in
-    # than the geojson file with geometry
-    hpi_df = pd.read_parquet(PATHS["hpi_long_parquet"])
-    hpi_df = standardize_columns(hpi_df)
-    hpi_df = change_dtype(hpi_df, "county_fips_full", income_gdf.county_fips_full.dtype)
-    
-    home_value = get_home_value_data()
-    rent_data = get_rent_data()
-    print("got Home Value DataFrame with columns:", home_value.columns.tolist())
-    print("Shape of Home Value DataFrame:", home_value.shape)
-    print("got Rent DataFrame with columns:", rent_data.columns.tolist())
-    print("Shape of Rent DataFrame:", rent_data.shape)
-    
-    print("Got HPI DataFrame with columns:", hpi_df.columns.tolist())    
-    print("Shape of HPI DataFrame:", hpi_df.shape)
-    home_and_rent = home_value.merge(rent_data, on=["county_fips_full", "year"], suffixes=('_home','_rent'))
-    print("Merged Home Value and Rent DataFrame shape:", home_and_rent.shape)
-    
-    # if not check_CRS(income_gdf, hpi_df):
-    #     raise ValueError("CRS mismatch between income and HPI GeoDataFrames.")
-    if not check_merge_columns(income_gdf, hpi_df, on=["county_fips_full", "year"]):
-        raise ValueError("Merge columns missing in one of the GeoDataFrames.")
-
-    income_df = income_gdf[["county_fips_full", "year", "median_household_income",'income_change',"county_name"]].copy()
-    # hpi_df = hpi_df[["county_fips_full", "year", "value","chg1",'county_name']].copy()
-    # hpi_df = hpi_df.rename(columns={"value": "hpi_value", "chg1": "hpi_chg1"}) # Rename columns for clarity when merged
-    
-    # print("Shape of Income GeoDataFrame:", income_gdf.shape)
-    # print("Going to merge the two GeoDataFrames on 'county_fips_full' and 'year'")
-
-    # merged_df = income_df.merge(hpi_df,
-    #     on=["county_fips_full", "year"],
-    #     suffixes=('_income', '_hpi')
-    # )  
-    # print("Merge took", time.time() - t, "seconds")
-    # # breakpoint()
-    
-    # merge income with home and rent first
-    home_and_rent['county_fips_full'] = change_dtype(home_and_rent, 'county_fips_full', income_df['county_fips_full'].dtype)['county_fips_full']
-    home_and_rent['year'] = change_dtype(home_and_rent, 'year', income_df['year'].dtype)['year']
-    print("Merging income with home value and rent data...")
-    merged_df = income_df.merge(home_and_rent,
-        on=["county_fips_full", "year"],
-        suffixes=('_income', '_home_rent'))
-
-    # # Make sure there is a valid geometry column
-    # if 'geometry' not in merged_df.columns:
-    #     raise ValueError("Merged DataFrame does not have a 'geometry' column.")
-    # if not isinstance(merged_df.geometry.iloc[0], (gpd.geoseries.GeoSeries,)):
-    #     merged_df = merged_df.drop(columns=['geometry'])
-    #     # Read in raw counties shapefile to get geometry
-    #     counties_shapefile = os.path.join(PATHS["geo_dir"], "counties.geojson")
-    #     counties_gdf = gpd.read_file(counties_shapefile).to_crs(TARGET_CRS)
-    #     counties_gdf = counties_gdf.rename(columns={"GEOID": "county_fips_full"})
-    #     counties_gdf = counties_gdf[['county_fips_full','geometry']]
-    #     counties_gdf = change_dtype(counties_gdf,"county_fips_full",merged_df.county_fips_full.dtype)
-    #     merged_df = merged_df.merge(counties_gdf[["county_fips_full", "geometry"]], on="county_fips_full", how="left")
-    #     # breakpoint()
-    # # if not isinstance(merged_df.geometry.iloc[0], (gpd.geoseries.GeoSeries,)):
-    # #     raise ValueError("The 'geometry' column in the merged DataFrame is not valid geometries.")
-    # if merged_df.crs is None:
-    #     merged_df.set_crs(TARGET_CRS, inplace=True)
-    # elif merged_df.crs.to_string() != TARGET_CRS:
-    #     merged_df = merged_df.to_crs(TARGET_CRS)
-        
-        
-    # output_geojson_path = os.path.join(PATHS["geo_dir"], "income_hpi_at_county.geojson")
-    # merged_df.to_file(output_geojson_path, driver="GeoJSON")
-    merged_df.to_parquet(PATHS["new_merged_parquet"], index=False)
-    # merged_df.to_file(PATHS["processed_dir"] + "/income_hpi_at_county.csv")
-    # merged_gdf.to_file(output_geojson_path, driver="GeoJSON")
-    # print(f"Merged GeoDataFrame saved to {output_geojson_path}")
-    
-    # prof = {
-    #     "merged_counties_number": merged_gdf["county_fips_full"].nunique(),
-    #     "years_covered": merged_gdf["year"].nunique(),
-    #     "total_records": len(merged_gdf),
-    #     "merged_counties": merged_gdf["NAMESLAD"].unique().tolist(),
-    #     "income_unmerged_counties": [i for i in income_gdf.NAMESLAD.unique().tolist() if i not in hpi_gdf.NAMESLAD.unique().tolist()],   # Placeholder, would need logic to determine unmerged counties
-    #     "hpi_unmerged_counties": [i for i in hpi_gdf.NAMESLAD.unique().tolist() if i not in income_gdf.NAMESLAD.unique().tolist()]   # Placeholder, would need logic to determine unmerged counties
-    # }
-    print("Generating data profile...")
-    print(income_gdf.columns)
-
-    prof = {
-        "merged_counties_number": merged_df["county_fips_full"].nunique(),
-        "years_covered": merged_df["year"].nunique(),
-        "total_records": len(merged_df),
-        "columns": merged_df.columns.tolist(),
-        "merged_counties": merged_df["county_name"].unique().tolist(),
-        # "income_unmerged_counties": [i for i in income_gdf.county_name.unique().tolist() if i not in hpi_df.county_name.unique().tolist()],   # Placeholder, would need logic to determine unmerged counties
-    }    
-    
-    
-    prof_path = os.path.join(PATHS["quality_dir"], "home_and_rent_and_income_merge.json")
-    with open(prof_path, "w") as f:
-        json.dump(prof, f, indent=4)
-    print(f"Data profile saved to {prof_path}")    
+    main()

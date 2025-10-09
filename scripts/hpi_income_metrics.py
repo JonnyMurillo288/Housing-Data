@@ -1,165 +1,173 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import os
 import sys
-import re
 import json
-import difflib
-from typing import Optional, Tuple, List
-
+import re
 import pandas as pd
 import numpy as np
-from pandas.tseries.offsets import MonthEnd, YearEnd
+from typing import Optional, List
 
-# Try geopandas; handle environments without it.
+# Optional geopandas support
 try:
     import geopandas as gpd
-except Exception as e:  # noqa: F841
+except ImportError:
     gpd = None
 
+# ===============================
+# CONFIG
+# ===============================
 
-# -----------------------------
-# Config
-# -----------------------------
-ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+def _safe_root() -> str:
+    try:
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    except NameError:
+        return os.getcwd()
+
+ROOT = _safe_root()
 PATHS = {
-    "input_csv": os.path.join(ROOT, "data",'processed',"income_hpi_home_rent_at_county.parquet"),
-    "shapefiles_dir": os.path.join(ROOT, "shapefiles"),
+    "input_parquet": os.path.join(ROOT, "data", "processed", "income_hpi_home_rent_at_county.parquet"),
     "processed_dir": os.path.join(ROOT, "data", "processed"),
-    "geo_dir": os.path.join(ROOT, "data", "geo"),
     "quality_dir": os.path.join(ROOT, "data", "quality"),
-    "fig_maps_dir": os.path.join(ROOT, "figures", "maps"),
 }
-
 TARGET_CRS = "EPSG:4326"
 
-'''
-This file is going to take in the combined income and house price data at the county level
-and perform some data quality checks, 
-- Create Housing affordability index (HAI)
-    - Ideally we can get median HH income and median home price for the same year
-    - Or if we can't get median Home Price and are stuck with HPI we can transform the HH Income into an index as well
-    - HAI = (Median Household Income / Median Home Price) * 100
-    - IndexedHAI = (Indexed Median Household Income / Indexed Median Home Price) * 100
-    - We can use the base year of the HPI as the base year for the income index
 
-'''
+# ===============================
+# UTILITIES
+# ===============================
 
-def get_period_columns(df: pd.DataFrame) -> pd.DataFrame:
-    '''function for finding the period columns of a dataframe'''
-    return
+def print_step(msg: str):
+    """Consistent console logging."""
+    print(f"▶ {msg}")
 
-def data_quality_checks(df: pd.DataFrame) -> pd.DataFrame:
-    # Check for missing values
-    missing_values = df.isnull().sum()
-    print("Missing values in each column:\n", missing_values)
+def ensure_dirs():
+    for k in ["processed_dir", "quality_dir"]:
+        os.makedirs(PATHS[k], exist_ok=True)
 
-    # Check for duplicates
-    duplicates = df.duplicated().sum()
-    print(f"Number of duplicate rows: {duplicates}")
+def check_columns(df: pd.DataFrame, required: List[str], name: str):
+    """Raise a clear error if required columns are missing."""
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns in {name}: {missing}")
 
-    # Check data types
-    print("Data types:\n", df.dtypes)
 
-    # Additional checks can be added here
+# ===============================
+# DATA CHECKS & CLEANING
+# ===============================
 
-    return df
+def data_quality_report(df: pd.DataFrame) -> dict:
+    """Return and print a simple data quality summary."""
+    report = {
+        "rows": len(df),
+        "cols": len(df.columns),
+        "duplicates": int(df.duplicated().sum()),
+        "missing_by_col": df.isna().sum().to_dict(),
+        "dtypes": {c: str(t) for c, t in df.dtypes.items()},
+    }
+    print_step(f"✅ Data Quality Report: {report['rows']} rows, {report['cols']} columns")
+    return report
 
-def get_monthly_income(df: pd.DataFrame) -> pd.DataFrame:
-    # Assuming df has a column 'median_household_income' which is annual income
-    # This function will convert it to monthly income so we can compare to rent in an understandble number
-    if 'median_household_income' not in df.columns:
-        raise ValueError("DataFrame must contain 'median_household_income' column")
 
-    # Convert annual income to monthly income
-    df['median_monthly_income'] = df['median_household_income'] / 12
+# ===============================
+# METRIC CALCULATIONS
+# ===============================
 
+def add_monthly_rent_income(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert annual renter income to monthly income."""
+    check_columns(df, ["median_renters_income"], "monthly_rent_income")
+    df = df.copy()
+    df["median_monthly_rent_income"] = df["median_household_income"] / 12
     return df
 
 def calculate_hai(df: pd.DataFrame) -> pd.DataFrame:
-    # Assuming df has columns 'median_household_income' and 'median_home_price'
-    if 'median_household_income' not in df.columns or 'median_home_value' not in df.columns:
-        raise ValueError("DataFrame must contain 'median_household_income' and 'median_home_value' columns")
-
-    # Calculate HAI
-    df['HAI'] = (df['median_home_value'] / df['median_household_income'])
-
-    # Handle potential division by zero or NaN values
-    df['HAI'].replace([np.inf, -np.inf], np.nan, inplace=True)
-
+    """Compute Housing Affordability Index."""
+    check_columns(df, ["median_home_value", "median_household_income"], "HAI")
+    df = df.copy()
+    df["HAI"] = df["median_home_value"] / df["median_household_income"]
+    df["HAI"].replace([np.inf, -np.inf], np.nan, inplace=True)
     return df
-
 
 def calculate_rai(df: pd.DataFrame) -> pd.DataFrame:
-    # Assuming df has columns 'median_gross_rent' and 'median_home_price'
-    if 'median_gross_rent' not in df.columns or 'median_monthly_income' not in df.columns:
-        raise ValueError("DataFrame must contain 'median_gross_rent' and 'median_home_value' columns")
-
-    # Calculate RAI
-    df['RAI'] = (df['median_monthly_income'] / df['median_gross_rent'])
-
-    # Handle potential division by zero or NaN values
-    df['RAI'].replace([np.inf, -np.inf], np.nan, inplace=True)
-
+    """Compute Rent Affordability Index."""
+    check_columns(df, ["median_gross_rent", "median_household_income"], "RAI")
+    df = df.copy()
+    df["RAI"] = df["median_monthly_rent_income"] / df["median_gross_rent"]
+    df["RAI"].replace([np.inf, -np.inf], np.nan, inplace=True)
     return df
 
-def calculate_indexed_hai(df: pd.DataFrame) -> pd.DataFrame:
-    df['HAI_Index'] = (df['median_household_income_indexed'] / df['hpi_value_indexed']) * 100
-    
-    # Handle potential division by zero or NaN values
-    df['HAI_Index'].replace([np.inf, -np.inf], np.nan, inplace=True)
-
+def index_variable(df: pd.DataFrame, variable: str, group_col: Optional[str] = "county_fips_full") -> pd.DataFrame:
+    """Index a numeric variable by its first available year within each group."""
+    if variable not in df.columns:
+        raise KeyError(f"Missing column {variable} for indexing.")
+    if df[variable].dtype not in [np.float64, np.int64, np.float32, np.int32]:
+        raise ValueError(f"{variable} must be numeric to index.")
+    df = df.copy()
+    df["base_value"] = df.sort_values("year").groupby(group_col)[variable].transform("first")
+    df[f"{variable}_indexed"] = df[variable] / df["base_value"]
     return df
 
-    
-def index_variable(df: pd.DataFrame, variable_to_index:str, groups_column: Optional[str]) -> pd.DataFrame:
-    ''' This function will index a variable based on a start year 
-    INPUTS:
-    
-    variable_to_index - column name of value to index
-    start_year - year to start the index
-    
-    '''
-    if df[variable_to_index].dtypes not in [int,float]:
-        raise ValueError(f'{variable_to_index} not a numeric')
-    
-    year_col = 'year' # TODO: Change to find the period column function when I need this functionality
-    if "Year" in df.columns.tolist():   
-        year_col = "Year"
 
-    df['base_value'] = df.sort_values(year_col).groupby(groups_column)[variable_to_index].transform("first")
-    df[f'{variable_to_index}_indexed'] = df[variable_to_index] / df['base_value']
-    return df    
+# ===============================
+# PIPELINE LOGIC
+# ===============================
 
-def main():
-    # Load data
-    # df = pd.read_csv(PATHS["input_csv"], dtype={"fips": str})
-    df = pd.read_parquet(PATHS["input_csv"])
-    print(f"Data loaded with shape: {df.shape}")
-    
-    # Data quality checks
-    # df = data_quality_checks(df)
-
-    # Calculate HAI
-    # df = calculate_hai(df)
-    print(df.columns)
-    df = index_variable(df,'median_household_income','county_fips_full')
-    # df = index_variable(df,'hpi_value','county_fips_full') # do we need to create a standardized hpi value as well? This is so we can see relatively how out of line the growth in HH income is over the growth in HPI
-    # Because we have in 1990 median home price
-    # We have in 1990 median income. Why not compare that over this time period instead of the full as weird assumptions fuck
-    
-    # df = calculate_indexed_hai(df)
-    df = get_monthly_income(df)
+def process_affordability_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    """Run all key transformations."""
+    df = add_monthly_rent_income(df)
     df = calculate_rai(df)
     df = calculate_hai(df)
-    
-    print(df.columns)
+    return df
 
-    # Save processed data
-    processed_path = os.path.join(PATHS["processed_dir"], "hpi_income_metrics_processed.csv")
-    df.to_csv(processed_path, index=False)
-    pq_out = os.path.join(PATHS['processed_dir'],'hpi_income_metrics.parquet')
-    df.to_parquet(pq_out)
-    print(f"Processed data saved to {processed_path}")
-    
-if __name__ == '__main__':
+
+# ===============================
+# SAVE FUNCTIONS
+# ===============================
+
+def save_outputs(df: pd.DataFrame, report: dict):
+    """Save processed data and quality report."""
+    ensure_dirs()
+    out_csv = os.path.join(PATHS["processed_dir"], "hpi_income_metrics_processed.csv")
+    out_parquet = os.path.join(PATHS["processed_dir"], "hpi_income_metrics.parquet")
+    report_path = os.path.join(PATHS["quality_dir"], "data_quality_report.json")
+
+    df.to_csv(out_csv, index=False)
+    df.to_parquet(out_parquet, index=False)
+    with open(report_path, "w") as f:
+        json.dump(report, f, indent=4)
+
+    print_step(f"📁 Saved CSV to {out_csv}")
+    print_step(f"📁 Saved Parquet to {out_parquet}")
+    print_step(f"📋 Saved Quality Report to {report_path}")
+
+
+# ===============================
+# MAIN
+# ===============================
+
+def main():
+    print_step("Loading dataset...")
+    df = pd.read_parquet(PATHS["input_parquet"])
+    print_step(f"Loaded dataframe with shape {df.shape}")
+
+    report = data_quality_report(df)
+    df = process_affordability_metrics(df)
+
+    # Select key columns
+    keep_cols = [
+        "county_fips_full", "year", "county_name",
+        "median_household_income", "median_renters_income",
+        "median_home_value", "median_gross_rent",
+        "income_change", "source_home", "source_rent",
+        "median_monthly_rent_income", "RAI", "HAI"
+    ]
+    keep_cols = [c for c in keep_cols if c in df.columns]
+    df = df[keep_cols].copy()
+
+    save_outputs(df, report)
+    print_step("✅ Processing complete.")
+
+
+if __name__ == "__main__":
     main()
